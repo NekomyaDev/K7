@@ -2,7 +2,7 @@
 @inject IStringLocalizer<SharedResource> S
 @inject IK7DialogService DialogService
 
-<div class="k7-settings-action-bar">
+<div class="k7-settings-action-bar" @ref="_root">
     @if (ShowResetToDefaults)
     {
         <K7Button Variant="outlined"

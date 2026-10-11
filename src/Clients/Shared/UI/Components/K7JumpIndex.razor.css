@@ -54,7 +54,7 @@
 @media (max-width: 599.98px) {
     .k7-jump-index {
         right: var(--space-2);
-        margin-bottom: var(--space-2);
+        margin-bottom: calc(var(--space-2) + var(--k7-mini-player-clearance));
     }
 }
 

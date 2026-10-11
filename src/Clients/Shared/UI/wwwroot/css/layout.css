@@ -141,7 +141,9 @@ html.platform-tv .app-shell--custom-nav {
     }
 
     .app-main:has(.music-mini-player) .page-scrollable:not(:has(.k7-virtual-grid)):not(:has(.k7-virtual-list)):not(:has(.k7-data-table-scroll)):not(:has(.browse-view-table)):not(:has(.browse-view-list)):not(:has(.browse-view-simple-grid))::after,
-    .app-main:has(.music-mini-player) .page-content:not(:has(> .full-bleed-page)):not(:has(> .admin-data-page))::after,
+    .app-main:has(.music-mini-player) .page-content:not(:has(> .full-bleed-page)):not(:has(> .admin-data-page)):not(:has(.settings-form-page))::after,
+    .app-main:has(.music-mini-player) .page-sidebar-scroll::after,
+    .app-main:has(.music-mini-player) .users-mobile::after,
     .app-main:has(.music-mini-player) .k7-virtual-grid::after,
     .app-main:has(.music-mini-player) .k7-virtual-list::after,
     .app-main:has(.music-mini-player) .k7-data-table-scroll::after,
@@ -162,8 +164,26 @@ html.platform-tv .app-shell--custom-nav {
         pointer-events: none;
     }
 
+    .app-main:has(.music-mini-player) .settings-form-page {
+        padding-bottom: calc(var(--k7-mini-player-clearance) + var(--space-3));
+    }
+
+    /* Save bar sits flush on the nav. The player keeps a small gap above the bar. */
     .app-main:has(.music-mini-player) .k7-settings-action-bar {
-        bottom: var(--k7-mini-player-clearance);
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: calc(var(--nav-height) + var(--k7-safe-bottom));
+        z-index: 8;
+        margin: 0;
+    }
+
+    .app-main:has(.music-mini-player):has(.k7-settings-action-bar) .settings-form-page {
+        padding-bottom: calc(var(--k7-settings-action-bar-height, 4rem) + var(--mini-player-height) + var(--space-2) + var(--space-3));
+    }
+
+    .app-main:has(.music-mini-player):has(.k7-settings-action-bar) .mini-player-dock {
+        bottom: calc(var(--nav-height) + var(--k7-safe-bottom) + var(--k7-settings-action-bar-height, 4rem) + var(--space-2));
     }
 }
 
@@ -655,8 +675,9 @@ html .app-nav-main .k7-btn.active {
 .settings-form-page {
     display: flex;
     flex-direction: column;
-    flex: 1;
-    min-height: 100%;
+    flex: 1 0 auto;
+    min-height: 0;
+    box-sizing: border-box;
 }
 
 .settings-form-page__body {
