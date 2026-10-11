@@ -201,6 +201,45 @@ public class CreateMediaSerieFolderConsensusTests
     }
 
     [Test]
+    public async Task Handle_ShouldPreferPopulatedSerie_WhenExternalIdIsShared()
+    {
+        var populated = await SeedSerieWithEpisodeAsync(
+            "Les Carnets de l'apothicaire",
+            "/media/series/The Apothecary Diaries/Season 01",
+            season: 1,
+            episode: 1,
+            externalId: "tmdb-shared");
+        var duplicate = new Serie
+        {
+            Id = Guid.NewGuid(),
+            Title = "Les Carnets de l'apothicaire",
+            SortTitle = "Les Carnets de l'apothicaire"
+        };
+        duplicate.ExternalIds.Add(new ExternalId { ProviderName = "tmdb", Value = "tmdb-shared" });
+        _context.Medias.Add(duplicate);
+        await _context.SaveChangesAsync();
+
+        var newFile = await SeedSerieIndexedFileAsync(
+            "/media/series/Somewhere Else/Season 03",
+            "The Apothecary Diaries - S03E01.mkv",
+            seriesTitle: "The Apothecary Diaries",
+            season: 3,
+            episode: 1);
+
+        _serieProvider.SearchSerieAsync(Arg.Any<MediaIdentification>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns("tmdb-shared");
+
+        var mediaId = await _handler.Handle(new CreateMediaCommand
+        {
+            MediaType = MediaType.Serie,
+            LibraryId = _libraryId,
+            IndexedFileIds = [newFile.Id]
+        }, CancellationToken.None);
+
+        mediaId.Should().Be(populated.Id);
+    }
+
+    [Test]
     public async Task Handle_ShouldSearchProvider_WhenFolderHasNoSiblingSeries()
     {
         var newFile = await SeedSerieIndexedFileAsync(

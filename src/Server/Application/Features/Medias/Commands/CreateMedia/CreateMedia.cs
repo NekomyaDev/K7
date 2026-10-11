@@ -1233,6 +1233,35 @@ public class CreateMediaCommandHandler : IRequestHandler<CreateMediaCommand, Gui
         return (serie, false, providerName, externalId);
     }
 
+    private async Task<Serie?> FindSerieByExternalIdPreferringPopulatedAsync(
+        string providerName,
+        string externalId,
+        CancellationToken cancellationToken)
+    {
+        var series = await _context.Medias
+            .OfType<Serie>()
+            .Include(s => s.ExternalIds)
+            .Where(s => s.ExternalIds.Any(e => e.ProviderName == providerName && e.Value == externalId))
+            .ToListAsync(cancellationToken);
+
+        if (series.Count <= 1)
+            return series.FirstOrDefault();
+
+        var serieIds = series.Select(s => s.Id).ToList();
+        var episodeCounts = await _context.Medias
+            .OfType<SerieEpisode>()
+            .Where(e => serieIds.Contains(e.SerieId))
+            .GroupBy(e => e.SerieId)
+            .Select(g => new { SerieId = g.Key, Count = g.Count() })
+            .ToListAsync(cancellationToken);
+        var countBySerieId = episodeCounts.ToDictionary(x => x.SerieId, x => x.Count);
+
+        return series
+            .OrderByDescending(s => countBySerieId.GetValueOrDefault(s.Id))
+            .ThenBy(s => s.Created)
+            .First();
+    }
+
     private async Task<(Serie Serie, bool IsNew, string? ProviderName, string? ProviderExternalId)> FindOrCreateSerieAsync(
         MediaIdentification identification,
         IReadOnlyList<MediaIdentification> fileIdentifications,
@@ -1266,7 +1295,7 @@ public class CreateMediaCommandHandler : IRequestHandler<CreateMediaCommand, Gui
         {
             foreach (var (providerName, externalId) in crosswalkIds.DefaultIfEmpty((matchedProviderName, providerExternalId)))
             {
-                var existingSerieById = await _identityLookup.FindMediaByExternalIdAsync<Serie>(
+                var existingSerieById = await FindSerieByExternalIdPreferringPopulatedAsync(
                     providerName, externalId, cancellationToken);
                 if (existingSerieById is not null)
                 {
