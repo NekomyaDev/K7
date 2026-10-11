@@ -81,23 +81,23 @@
                 </div>
             }
             <div class="library-card__actions admin-entity-card__footer">
-                <K7Button Variant="text" Size="sm" StartIcon="@Phosphor.Pencil" OnClick="@(() => OpenEditDialog(library))">@L["AriaEdit"]</K7Button>
                 @if (library.PeerServerId is null)
                 {
-                    <K7Button Variant="text" Size="sm" Color="error" StartIcon="@Phosphor.Trash" OnClick="@(() => DeleteLibrary(library))">@L["AriaDelete"]</K7Button>
+                    <K7Button Variant="text" Size="sm" StartIcon="@Phosphor.ArrowClockwise" OnClick="@(() => IndexLibrary(library))">@L["AriaIndex"]</K7Button>
                 }
+                <K7Button Variant="text" Size="sm" StartIcon="@Phosphor.Pencil" OnClick="@(() => OpenEditDialog(library))">@L["AriaEdit"]</K7Button>
                 <K7Menu>
                     <ActivatorContent>
                         <K7IconButton Icon="@Phosphor.DotsThreeVertical" Size="sm" AriaLabel="@L["MoreActions"]" />
                     </ActivatorContent>
                     <ChildContent>
+                        <K7MenuItem Icon="@Phosphor.Users" OnClick="@(() => OpenUsersDialog(library))">@L["AriaUserAccess"]</K7MenuItem>
                         @if (library.PeerServerId is null)
                         {
-                            <K7MenuItem Icon="@Phosphor.ArrowClockwise" OnClick="@(() => IndexLibrary(library))">@L["AriaIndex"]</K7MenuItem>
-                            <K7MenuItem Icon="@Phosphor.MagnifyingGlass" OnClick="@(() => RematchLibrary(library))">@L["AriaRematch"]</K7MenuItem>
                             <K7MenuItem Icon="@Phosphor.ArrowsClockwise" OnClick="@(() => RefreshLibraryMetadata(library))">@L["AriaRefreshMetadata"]</K7MenuItem>
+                            <K7MenuItem Class="k7-menu-item--warning" Icon="@Phosphor.MagnifyingGlass" OnClick="@(() => RematchLibrary(library))">@L["AriaRematch"]</K7MenuItem>
+                            <K7MenuItem Class="k7-menu-item--error" Icon="@Phosphor.Trash" OnClick="@(() => DeleteLibrary(library))">@L["AriaDelete"]</K7MenuItem>
                         }
-                        <K7MenuItem Icon="@Phosphor.Users" OnClick="@(() => OpenUsersDialog(library))">@L["AriaUserAccess"]</K7MenuItem>
                     </ChildContent>
                 </K7Menu>
             </div>

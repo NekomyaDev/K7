@@ -991,6 +991,10 @@ details.k7-expansion[open] .k7-expansion-icon { transform: rotate(90deg); }
 }
 .k7-menu-item-icon { display: inline-flex; align-items: center; justify-content: center; width: 1.25rem; flex-shrink: 0; }
 .k7-menu-item-icon i { color: var(--color-text-muted); font-size: var(--text-base); }
+.k7-menu-item--warning,
+.k7-menu-item--warning .k7-menu-item-icon i { color: var(--color-warning); }
+.k7-menu-item--error,
+.k7-menu-item--error .k7-menu-item-icon i { color: var(--color-error); }
 .k7-menu-item-text { flex: 1; min-width: 0; }
 .k7-menu-item-chevron { display: inline-flex; align-items: center; margin-left: auto; opacity: 0.6; }
 hr.k7-menu-divider { border: none; border-top: 1px solid var(--color-border); margin: var(--space-1) 0; }
