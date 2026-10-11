@@ -23,38 +23,50 @@
     {
         <K7ProgressBar Indeterminate="true" />
     }
-    else if (_summaries is null || _totalIssueCount == 0)
-    {
-        <K7EmptyState Icon="@Phosphor.CheckCircle" Title="@L["Empty"]" Subtitle="@L["EmptyDescription"]" />
-    }
-    else
+    else if (_summaries is not null)
     {
         <section class="diagnostics-dashboard__section" aria-label="@L["FilterSeverity"]">
             <div class="diagnostics-dashboard__stat-grid">
                 <button type="button" class="diagnostics-dashboard__stat-link focusable"
+                        disabled="@(_errorCount == 0)"
                         @onclick="@(() => NavigateToDetails(severity: "error"))">
                     <K7Paper Outlined="true" Class="diagnostics-dashboard__stat-card">
                         <span class="text-overline">@L["SeverityErrors"]</span>
-                        <h3 class="diagnostics-dashboard__stat-value diagnostics-dashboard__stat-value--error">@_errorCount</h3>
+                        <h3 class="diagnostics-dashboard__stat-value @StatValueClass(_errorCount, "error")">@_errorCount</h3>
                     </K7Paper>
                 </button>
                 <button type="button" class="diagnostics-dashboard__stat-link focusable"
+                        disabled="@(_warningCount == 0)"
                         @onclick="@(() => NavigateToDetails(severity: "warning"))">
                     <K7Paper Outlined="true" Class="diagnostics-dashboard__stat-card">
                         <span class="text-overline">@L["SeverityWarnings"]</span>
-                        <h3 class="diagnostics-dashboard__stat-value diagnostics-dashboard__stat-value--warning">@_warningCount</h3>
+                        <h3 class="diagnostics-dashboard__stat-value @StatValueClass(_warningCount, "warning")">@_warningCount</h3>
                     </K7Paper>
                 </button>
                 <button type="button" class="diagnostics-dashboard__stat-link focusable"
+                        disabled="@(_infoCount == 0)"
                         @onclick="@(() => NavigateToDetails(severity: "info"))">
                     <K7Paper Outlined="true" Class="diagnostics-dashboard__stat-card">
                         <span class="text-overline">@L["SeverityInfo"]</span>
-                        <h3 class="diagnostics-dashboard__stat-value diagnostics-dashboard__stat-value--info">@_infoCount</h3>
+                        <h3 class="diagnostics-dashboard__stat-value @StatValueClass(_infoCount, "info")">@_infoCount</h3>
                     </K7Paper>
                 </button>
             </div>
-            <p class="text-caption diagnostics-dashboard__stat-hint">@L["SeverityTotalsHint"]</p>
+            @if (_totalIssueCount > 0)
+            {
+                <p class="text-caption diagnostics-dashboard__stat-hint">@L["SeverityTotalsHint"]</p>
+            }
         </section>
+
+        @if (_totalIssueCount == 0)
+        {
+            <div class="diagnostics-dashboard__all-clear" role="status">
+                <K7Icon Icon="@Phosphor.Fill.CheckCircle" Color="success" IconSize="K7IconSize.Xl" />
+                <h6 class="diagnostics-dashboard__all-clear-title">@L["AllClear"]</h6>
+            </div>
+        }
+        else
+        {
 
         @if (!_isTv)
         {
@@ -168,6 +180,7 @@
                     </RowTemplate>
                 </K7Table>
             </section>
+        }
         }
     }
 </div>

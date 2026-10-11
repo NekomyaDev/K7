@@ -121,6 +121,11 @@ public partial class AdminDiagnosticsPanel : IDisposable
             .ToList();
     }
 
+    private static string StatValueClass(int count, string severity) =>
+        count == 0
+            ? "diagnostics-dashboard__stat-value--ok"
+            : $"diagnostics-dashboard__stat-value--{severity}";
+
     private int GetWorkClassCount(DiagnosticWorkClass workClass) =>
         LibraryHealthSummaryCounts.SumWorkClass(_scopedSummaries, workClass);
 

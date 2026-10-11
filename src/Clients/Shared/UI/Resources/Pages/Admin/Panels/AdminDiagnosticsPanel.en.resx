@@ -26,6 +26,7 @@
   <data name="SeverityWarnings" xml:space="preserve"><value>Warnings</value></data>
   <data name="SeverityInfo" xml:space="preserve"><value>Info</value></data>
   <data name="NoData" xml:space="preserve"><value>No data available.</value></data>
+  <data name="AllClear" xml:space="preserve"><value>Everything is running perfectly</value></data>
   <data name="Empty" xml:space="preserve"><value>No issues</value></data>
   <data name="EmptyDescription" xml:space="preserve"><value>Everything looks fine, or nothing matches your filters.</value></data>
   <data name="EntityAndProblemCount" xml:space="preserve"><value>{0} item(s) · {1} problem(s)</value></data>
