@@ -223,6 +223,42 @@ public class GetDiagnosticsSummaryQueryHandlerTests
     }
 
     [Test]
+    public async Task Handle_ShouldNotCountMissingMetadata_ForEpisodesWithoutGenres()
+    {
+        var libraryId = SeedSerieLibrary();
+        var serieId = Guid.NewGuid();
+        var seasonId = Guid.NewGuid();
+        var episodeId = Guid.NewGuid();
+
+        _context.Medias.AddRange(
+            new Serie { Id = serieId, Title = "Show", Overview = "Synopsis" },
+            new SerieSeason { Id = seasonId, SerieId = serieId, SeasonNumber = 1, Title = "S1", Overview = "Season" },
+            new SerieEpisode
+            {
+                Id = episodeId,
+                SerieId = serieId,
+                SeasonId = seasonId,
+                EpisodeNumber = 1,
+                Title = "Episode",
+                Overview = "Filled overview"
+            });
+        _context.MediaLibraryAvailabilities.AddRange(
+            new MediaLibraryAvailability { LibraryId = libraryId, MediaId = serieId },
+            new MediaLibraryAvailability { LibraryId = libraryId, MediaId = seasonId },
+            new MediaLibraryAvailability { LibraryId = libraryId, MediaId = episodeId });
+        _context.ExternalIds.AddRange(
+            new ExternalId { Id = Guid.NewGuid(), ProviderName = "tmdb", Value = "1", MediaId = serieId },
+            new ExternalId { Id = Guid.NewGuid(), ProviderName = "tmdb", Value = "2", MediaId = seasonId },
+            new ExternalId { Id = Guid.NewGuid(), ProviderName = "tmdb", Value = "3", MediaId = episodeId });
+        await _context.SaveChangesAsync();
+
+        var summaries = await _handler.Handle(new GetDiagnosticsSummaryQuery(), CancellationToken.None);
+        var summary = summaries.Should().ContainSingle().Subject;
+
+        summary.MediaMissingMetadataCount.Should().Be(1);
+    }
+
+    [Test]
     public async Task Handle_ShouldCountMissingHlsSegments_ForLocalTransmuxLibraries()
     {
         var libraryId = SeedMovieLibrary();

@@ -379,6 +379,8 @@ public class GetDiagnosticsSummaryQueryHandler : IRequestHandler<GetDiagnosticsS
             from p in pairs
             join m in _context.Medias.AsNoTracking() on p.MediaId equals m.Id
             where m.ExternalIds.Any()
+                && m.Type != MediaType.SerieEpisode
+                && m.Type != MediaType.SerieSeason
                 && !m.MetadataTags.Any(mt => mt.MetadataTag.Kind == MetadataTagKind.Genre)
             select new { p.LibraryId, p.MediaId }
         )

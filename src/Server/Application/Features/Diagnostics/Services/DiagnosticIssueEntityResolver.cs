@@ -213,6 +213,9 @@ public class DiagnosticIssueEntityResolver(
         return medias
             .Where(m =>
             {
+                if (m.Type is MediaType.SerieEpisode or MediaType.SerieSeason)
+                    return false;
+
                 var isEnrichableMedia = m.Type is MediaType.Movie or MediaType.Serie or MediaType.MusicAlbum;
                 if (!m.HasExternalIds && !isEnrichableMedia && m.GenreCount == 0)
                     return true;

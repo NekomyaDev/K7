@@ -561,8 +561,13 @@ public class GetDiagnosticItemsQueryHandler : IRequestHandler<GetDiagnosticItems
 
             var isEnrichableMedia = m.Type is MediaType.Movie or MediaType.Serie or MediaType.MusicAlbum;
             if (!m.HasExternalIds && isEnrichableMedia) issues.Add(DiagnosticIssue.MissingExternalId);
-            if (!m.HasExternalIds && !isEnrichableMedia && m.GenreCount == 0) issues.Add(DiagnosticIssue.MissingMetadata);
-            if (m.HasExternalIds && m.GenreCount == 0) issues.Add(DiagnosticIssue.MissingMetadata);
+            // Episodes and seasons do not carry genres. Those live on the serie, and the
+            // metadata editor does not show a genre field for them.
+            if (m.Type is not (MediaType.SerieEpisode or MediaType.SerieSeason))
+            {
+                if (!m.HasExternalIds && !isEnrichableMedia && m.GenreCount == 0) issues.Add(DiagnosticIssue.MissingMetadata);
+                if (m.HasExternalIds && m.GenreCount == 0) issues.Add(DiagnosticIssue.MissingMetadata);
+            }
 
             if (m.IsMusicTrack
                 && trackNavById.TryGetValue(m.Id, out var trackRef)
@@ -743,8 +748,11 @@ public class GetDiagnosticItemsQueryHandler : IRequestHandler<GetDiagnosticItems
         var viaAvailability = _context.Medias
             .AsNoTracking()
             .Where(m => availability.Any(a => a.MediaId == m.Id))
-            .Where(m => !m.ExternalIds.Any()
+            .Where(m => (m.Type == MediaType.Movie || m.Type == MediaType.Serie || m.Type == MediaType.MusicAlbum || m.Type == MediaType.MusicTrack)
+                            && !m.ExternalIds.Any()
                         || m.MetadataTags.Count(mt => mt.MetadataTag.Kind == MetadataTagKind.Genre) == 0
+                            && m.Type != MediaType.SerieEpisode
+                            && m.Type != MediaType.SerieSeason
                         || _context.Medias.OfType<MusicTrack>().Any(t => t.Id == m.Id && t.AudioAnalysis == null)
                         || (m.Type == MediaType.Movie || m.Type == MediaType.Serie)
                             && (!_context.MetadataPictures.Any(p => p.MediaId == m.Id && p.Type == MetadataPictureType.Poster)
@@ -806,6 +814,7 @@ public class GetDiagnosticItemsQueryHandler : IRequestHandler<GetDiagnosticItems
         if (activeIssues.Contains(DiagnosticIssue.MissingMetadata))
         {
             Add(medias
+                .Where(m => m.Type != MediaType.SerieEpisode && m.Type != MediaType.SerieSeason)
                 .Where(m => m.MetadataTags.Count(mt => mt.MetadataTag.Kind == MetadataTagKind.Genre) == 0)
                 .Where(m => m.ExternalIds.Any()
                     || m.Type != MediaType.Movie && m.Type != MediaType.Serie && m.Type != MediaType.MusicAlbum)

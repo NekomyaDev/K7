@@ -333,6 +333,58 @@ public class GetDiagnosticItemsPagingTests
         result.Items.Should().BeEmpty();
     }
 
+    [Test]
+    public async Task Handle_ShouldNotFlagEpisode_WhenItHasNoGenres()
+    {
+        var serieId = Guid.NewGuid();
+        var seasonId = Guid.NewGuid();
+        var episodeId = Guid.NewGuid();
+        var episodeWithoutId = Guid.NewGuid();
+        _context.Medias.AddRange(
+            new Serie { Id = serieId, Title = "Show" },
+            new SerieSeason { Id = seasonId, SerieId = serieId, SeasonNumber = 1, Title = "S1", Overview = "Season" },
+            new SerieEpisode
+            {
+                Id = episodeId,
+                SerieId = serieId,
+                SeasonId = seasonId,
+                EpisodeNumber = 1,
+                Title = "Pilot",
+                Overview = "Filled"
+            },
+            new SerieEpisode
+            {
+                Id = episodeWithoutId,
+                SerieId = serieId,
+                SeasonId = seasonId,
+                EpisodeNumber = 2,
+                Title = "Second",
+                Overview = "Also filled"
+            });
+        _context.MediaLibraryAvailabilities.AddRange(
+            new MediaLibraryAvailability { LibraryId = _libraryId, MediaId = seasonId },
+            new MediaLibraryAvailability { LibraryId = _libraryId, MediaId = episodeId },
+            new MediaLibraryAvailability { LibraryId = _libraryId, MediaId = episodeWithoutId });
+        AddExternalId(seasonId, "tmdb", "98");
+        AddExternalId(episodeId, "tmdb", "99");
+
+        var movieId = AddMovie("Needs Genres", 2020);
+        AddExternalId(movieId, "tmdb", "100");
+        await _context.SaveChangesAsync();
+
+        var result = await _handler.Handle(
+            new GetDiagnosticItemsQuery
+            {
+                EntityType = DiagnosticEntityType.Media,
+                Issue = DiagnosticIssue.MissingMetadata,
+                PageNumber = 1,
+                PageSize = 20
+            },
+            CancellationToken.None);
+
+        result.Items.Select(i => i.EntityId).Should().BeEquivalentTo([movieId]);
+    }
+
     private void SeedLibrary()
     {
         _libraryId = Guid.NewGuid();
