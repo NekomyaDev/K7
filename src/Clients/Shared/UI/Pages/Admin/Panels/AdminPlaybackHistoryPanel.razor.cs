@@ -37,7 +37,12 @@ public partial class AdminPlaybackHistoryPanel : IAsyncDisposable
     [SupplyParameterFromQuery(Name = "to")]
     public string? QueryTo { get; set; }
 
+    [SupplyParameterFromQuery(Name = "q")]
+    public string? QuerySearch { get; set; }
+
     private K7DataTable<PlaybackHistoryItemDto>? _tableRef;
+    private string _searchText = "";
+    private string? _appliedSearch;
     private List<UserDto> _users = [];
     private Guid? _selectedUserId;
     private string _selectedMediaType = "";
@@ -113,7 +118,7 @@ public partial class AdminPlaybackHistoryPanel : IAsyncDisposable
             _users = [];
         }
 
-        if (PageFilterUrlSync.HasAnyQuery(NavigationManager, "userId", "mediaType", "period", "from", "to"))
+        if (PageFilterUrlSync.HasAnyQuery(NavigationManager, "userId", "mediaType", "period", "from", "to", "q"))
         {
             ApplyFiltersFromQuery();
             await SaveFiltersToStorageAsync();
@@ -142,7 +147,7 @@ public partial class AdminPlaybackHistoryPanel : IAsyncDisposable
             return;
         }
 
-        if (!PageFilterUrlSync.HasAnyQuery(NavigationManager, "userId", "mediaType", "period", "from", "to"))
+        if (!PageFilterUrlSync.HasAnyQuery(NavigationManager, "userId", "mediaType", "period", "from", "to", "q"))
         {
             return;
         }
@@ -152,12 +157,14 @@ public partial class AdminPlaybackHistoryPanel : IAsyncDisposable
         var previousPeriod = _selectedPeriod;
         var previousFrom = _fromDate;
         var previousTo = _toDate;
+        var previousSearch = _appliedSearch;
         ApplyFiltersFromQuery();
         if (previousUserId != _selectedUserId
             || previousMediaType != _selectedMediaType
             || previousPeriod != _selectedPeriod
             || previousFrom != _fromDate
-            || previousTo != _toDate)
+            || previousTo != _toDate
+            || previousSearch != _appliedSearch)
         {
             _tableKey++;
         }
@@ -187,6 +194,8 @@ public partial class AdminPlaybackHistoryPanel : IAsyncDisposable
         {
             _toDate = toDate;
         }
+
+        ApplySearch(QuerySearch ?? PageFilterUrlSync.GetQueryValue(NavigationManager, "q"));
     }
 
     private void SyncFiltersToQuery() =>
@@ -198,7 +207,8 @@ public partial class AdminPlaybackHistoryPanel : IAsyncDisposable
         ["mediaType"] = string.IsNullOrEmpty(_selectedMediaType) ? null : _selectedMediaType,
         ["period"] = _selectedPeriod is "all" ? null : _selectedPeriod,
         ["from"] = _selectedPeriod == "custom" ? _fromDate.ToString("yyyy-MM-dd") : null,
-        ["to"] = _selectedPeriod == "custom" ? _toDate.ToString("yyyy-MM-dd") : null
+        ["to"] = _selectedPeriod == "custom" ? _toDate.ToString("yyyy-MM-dd") : null,
+        ["q"] = _appliedSearch
     };
 
     private async Task<bool> LoadPersistedFiltersAsync()
@@ -224,6 +234,8 @@ public partial class AdminPlaybackHistoryPanel : IAsyncDisposable
                 _toDate = to;
             }
 
+            ApplySearch(state.Search);
+
             return true;
         }
         catch
@@ -243,7 +255,8 @@ public partial class AdminPlaybackHistoryPanel : IAsyncDisposable
                     _selectedMediaType,
                     _selectedPeriod,
                     _selectedPeriod == "custom" ? _fromDate.ToString("yyyy-MM-dd") : null,
-                    _selectedPeriod == "custom" ? _toDate.ToString("yyyy-MM-dd") : null),
+                    _selectedPeriod == "custom" ? _toDate.ToString("yyyy-MM-dd") : null,
+                    _appliedSearch),
                 CancellationToken.None);
         }
         catch
@@ -256,6 +269,41 @@ public partial class AdminPlaybackHistoryPanel : IAsyncDisposable
     {
         await SaveFiltersToStorageAsync();
         SyncFiltersToQuery();
+    }
+
+    private Task OnSearchTextChanged(string? value)
+    {
+        _searchText = value ?? "";
+        if (string.IsNullOrWhiteSpace(_searchText))
+            return ApplySearchAsync(null);
+
+        return Task.CompletedTask;
+    }
+
+    private Task OnSearchDebounced(string? value)
+    {
+        var current = _searchText.Trim();
+        if (!string.Equals(current, value?.Trim(), StringComparison.Ordinal))
+            return Task.CompletedTask;
+
+        return ApplySearchAsync(current.Length >= 2 ? current : null);
+    }
+
+    private async Task ApplySearchAsync(string? search)
+    {
+        if (string.Equals(_appliedSearch, search, StringComparison.Ordinal))
+            return;
+
+        _appliedSearch = search;
+        await PersistFiltersAsync();
+        RefreshTableAsync();
+    }
+
+    private void ApplySearch(string? value)
+    {
+        var trimmed = value?.Trim();
+        _searchText = trimmed ?? "";
+        _appliedSearch = string.IsNullOrEmpty(trimmed) || trimmed.Length < 2 ? null : trimmed;
     }
 
     private async Task OnUserChanged(Guid? userId)
@@ -334,7 +382,7 @@ public partial class AdminPlaybackHistoryPanel : IAsyncDisposable
         {
             var tasks = Enumerable.Range(firstPage, lastPage - firstPage + 1)
                 .Select(page => K7ServerService.GetAdminPlaybackHistoryAsync(
-                    page, PageSize, mediaTypeParam, _selectedUserId, _selectedPeriod, from, to, cancellationToken));
+                    page, PageSize, mediaTypeParam, _selectedUserId, _selectedPeriod, from, to, _appliedSearch, cancellationToken));
 
             var results = await Task.WhenAll(tasks);
 
@@ -570,7 +618,8 @@ public partial class AdminPlaybackHistoryPanel : IAsyncDisposable
                     _selectedUserId,
                     _selectedPeriod,
                     from,
-                    to);
+                    to,
+                    _appliedSearch);
                 if (result?.Items is not { Count: > 0 })
                     break;
 

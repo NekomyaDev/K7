@@ -32,7 +32,12 @@ public partial class PlaybackHistory : IAsyncDisposable
     [SupplyParameterFromQuery(Name = "to")]
     public string? QueryTo { get; set; }
 
+    [SupplyParameterFromQuery(Name = "q")]
+    public string? QuerySearch { get; set; }
+
     private K7DataTable<PlaybackHistoryItemDto>? _tableRef;
+    private string _searchText = "";
+    private string? _appliedSearch;
     private string _selectedMediaType = "";
     private string _selectedPeriod = "month";
     private DateOnly _fromDate = DateOnly.FromDateTime(DateTime.Now.AddMonths(-1));
@@ -95,7 +100,7 @@ public partial class PlaybackHistory : IAsyncDisposable
             new("5", Label: L["TVShows"])
         ];
 
-        if (PageFilterUrlSync.HasAnyQuery(Navigation, "period", "mediaType", "from", "to"))
+        if (PageFilterUrlSync.HasAnyQuery(Navigation, "period", "mediaType", "from", "to", "q"))
         {
             ApplyFiltersFromQuery();
             await SaveFiltersToStorageAsync();
@@ -133,6 +138,8 @@ public partial class PlaybackHistory : IAsyncDisposable
         {
             _toDate = toDate;
         }
+
+        ApplySearch(QuerySearch ?? PageFilterUrlSync.GetQueryValue(Navigation, "q"));
     }
 
     private void SyncFiltersToQuery() =>
@@ -143,7 +150,8 @@ public partial class PlaybackHistory : IAsyncDisposable
         ["period"] = _selectedPeriod is "month" ? null : _selectedPeriod,
         ["mediaType"] = string.IsNullOrEmpty(_selectedMediaType) ? null : _selectedMediaType,
         ["from"] = _selectedPeriod == "custom" ? _fromDate.ToString("yyyy-MM-dd") : null,
-        ["to"] = _selectedPeriod == "custom" ? _toDate.ToString("yyyy-MM-dd") : null
+        ["to"] = _selectedPeriod == "custom" ? _toDate.ToString("yyyy-MM-dd") : null,
+        ["q"] = _appliedSearch
     };
 
     private async Task<bool> LoadPersistedFiltersAsync()
@@ -168,6 +176,8 @@ public partial class PlaybackHistory : IAsyncDisposable
                 _toDate = to;
             }
 
+            ApplySearch(state.Search);
+
             return true;
         }
         catch
@@ -186,7 +196,8 @@ public partial class PlaybackHistory : IAsyncDisposable
                     _selectedMediaType,
                     _selectedPeriod,
                     _selectedPeriod == "custom" ? _fromDate.ToString("yyyy-MM-dd") : null,
-                    _selectedPeriod == "custom" ? _toDate.ToString("yyyy-MM-dd") : null),
+                    _selectedPeriod == "custom" ? _toDate.ToString("yyyy-MM-dd") : null,
+                    _appliedSearch),
                 CancellationToken.None);
         }
         catch
@@ -217,6 +228,41 @@ public partial class PlaybackHistory : IAsyncDisposable
         if (range.To is not null) _toDate = range.To.Value;
         await PersistFiltersAsync();
         await RefreshTableAsync();
+    }
+
+    private Task OnSearchTextChanged(string? value)
+    {
+        _searchText = value ?? "";
+        if (string.IsNullOrWhiteSpace(_searchText))
+            return ApplySearchAsync(null);
+
+        return Task.CompletedTask;
+    }
+
+    private Task OnSearchDebounced(string? value)
+    {
+        var current = _searchText.Trim();
+        if (!string.Equals(current, value?.Trim(), StringComparison.Ordinal))
+            return Task.CompletedTask;
+
+        return ApplySearchAsync(current.Length >= 2 ? current : null);
+    }
+
+    private async Task ApplySearchAsync(string? search)
+    {
+        if (string.Equals(_appliedSearch, search, StringComparison.Ordinal))
+            return;
+
+        _appliedSearch = search;
+        await PersistFiltersAsync();
+        await RefreshTableAsync();
+    }
+
+    private void ApplySearch(string? value)
+    {
+        var trimmed = value?.Trim();
+        _searchText = trimmed ?? "";
+        _appliedSearch = string.IsNullOrEmpty(trimmed) || trimmed.Length < 2 ? null : trimmed;
     }
 
     private async Task OnMediaTypeChanged(string mediaType)
@@ -251,7 +297,7 @@ public partial class PlaybackHistory : IAsyncDisposable
         try
         {
             var tasks = Enumerable.Range(firstPage, lastPage - firstPage + 1)
-                .Select(page => K7ServerService.GetPlaybackHistoryAsync(page, PageSize, mediaTypeParam, _selectedPeriod, from, to, cancellationToken));
+                .Select(page => K7ServerService.GetPlaybackHistoryAsync(page, PageSize, mediaTypeParam, _selectedPeriod, from, to, _appliedSearch, cancellationToken));
 
             var results = await Task.WhenAll(tasks);
 
@@ -482,7 +528,8 @@ public partial class PlaybackHistory : IAsyncDisposable
                     mediaTypeParam,
                     _selectedPeriod,
                     from,
-                    to);
+                    to,
+                    _appliedSearch);
                 if (result?.Items is not { Count: > 0 })
                     break;
 

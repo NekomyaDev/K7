@@ -63,7 +63,8 @@ public class GetPlaybackHistoryQueryHandlerTests
         _identityService.GetRolesAsync("ident").Returns([Roles.User]);
         _identityService.GetRolesAsync("other").Returns([Roles.User]);
 
-        _handler = new GetPlaybackHistoryQueryHandler(_context, _currentUser, _identityService);
+        var databaseCapabilities = Substitute.For<IDatabaseCapabilities>();
+        _handler = new GetPlaybackHistoryQueryHandler(_context, _currentUser, _identityService, databaseCapabilities);
     }
 
     [TearDown]
@@ -510,6 +511,195 @@ public class GetPlaybackHistoryQueryHandlerTests
         result.Items[0].IsCompleted.Should().BeTrue();
         result.Items[0].IsSkipped.Should().BeFalse();
         result.Items[0].TotalWatchedSeconds.Should().Be(200);
+    }
+
+    [Test]
+    public async Task Handle_ShouldFilterByMediaTitle_WhenSearchMatches()
+    {
+        var otherId = Guid.NewGuid();
+        _context.Medias.Add(new Movie { Id = otherId, Title = "Arrival" });
+        AddSession(_movieId);
+        AddSession(otherId);
+        await _context.SaveChangesAsync();
+
+        var result = await _handler.Handle(
+            new GetPlaybackHistoryQuery { Period = "all", Search = "film" },
+            CancellationToken.None);
+
+        result.Items.Should().ContainSingle();
+        result.Items[0].MediaId.Should().Be(_movieId);
+    }
+
+    [Test]
+    public async Task Handle_ShouldIgnoreSearch_WhenShorterThanTwoCharacters()
+    {
+        var otherId = Guid.NewGuid();
+        _context.Medias.Add(new Movie { Id = otherId, Title = "Arrival" });
+        AddSession(_movieId);
+        AddSession(otherId);
+        await _context.SaveChangesAsync();
+
+        var result = await _handler.Handle(
+            new GetPlaybackHistoryQuery { Period = "all", Search = "f" },
+            CancellationToken.None);
+
+        result.Items.Should().HaveCount(2);
+    }
+
+    [Test]
+    public async Task Handle_ShouldMatchEpisodeHistory_WhenSeriesTitleMatches()
+    {
+        var serieId = Guid.NewGuid();
+        var seasonId = Guid.NewGuid();
+        var episodeId = Guid.NewGuid();
+        var serie = new Serie { Id = serieId, Title = "Severance" };
+        var season = new SerieSeason
+        {
+            Id = seasonId,
+            SerieId = serieId,
+            Serie = serie,
+            SeasonNumber = 1,
+            Title = "Season 1"
+        };
+        var episode = new SerieEpisode
+        {
+            Id = episodeId,
+            SerieId = serieId,
+            Serie = serie,
+            SeasonId = seasonId,
+            Season = season,
+            EpisodeNumber = 1,
+            Title = "Pilot"
+        };
+        _context.Medias.AddRange(serie, season, episode);
+        AddSession(episodeId);
+        AddSession(_movieId);
+        await _context.SaveChangesAsync();
+
+        var result = await _handler.Handle(
+            new GetPlaybackHistoryQuery { Period = "all", Search = "severance" },
+            CancellationToken.None);
+
+        result.Items.Should().ContainSingle();
+        result.Items[0].MediaId.Should().Be(episodeId);
+    }
+
+    [Test]
+    public async Task Handle_ShouldMatchFoldedSortTitle_WhenSearchOmitsDiacritics()
+    {
+        var movieId = Guid.NewGuid();
+        _context.Medias.Add(new Movie { Id = movieId, Title = "Amélie", SortTitle = "Amelie" });
+        AddSession(movieId);
+        AddSession(_movieId);
+        await _context.SaveChangesAsync();
+
+        var result = await _handler.Handle(
+            new GetPlaybackHistoryQuery { Period = "all", Search = "amelie" },
+            CancellationToken.None);
+
+        result.Items.Should().ContainSingle();
+        result.Items[0].MediaId.Should().Be(movieId);
+    }
+
+    [Test]
+    public async Task Handle_ShouldMatchEpisodeHistory_WhenSeasonTitleMatches()
+    {
+        var serieId = Guid.NewGuid();
+        var seasonId = Guid.NewGuid();
+        var episodeId = Guid.NewGuid();
+        var serie = new Serie { Id = serieId, Title = "Severance" };
+        var season = new SerieSeason
+        {
+            Id = seasonId,
+            SerieId = serieId,
+            Serie = serie,
+            SeasonNumber = 1,
+            Title = "Winter"
+        };
+        var episode = new SerieEpisode
+        {
+            Id = episodeId,
+            SerieId = serieId,
+            Serie = serie,
+            SeasonId = seasonId,
+            Season = season,
+            EpisodeNumber = 1,
+            Title = "Pilot"
+        };
+        _context.Medias.AddRange(serie, season, episode);
+        AddSession(episodeId);
+        AddSession(_movieId);
+        await _context.SaveChangesAsync();
+
+        var result = await _handler.Handle(
+            new GetPlaybackHistoryQuery { Period = "all", Search = "winter" },
+            CancellationToken.None);
+
+        result.Items.Should().ContainSingle();
+        result.Items[0].MediaId.Should().Be(episodeId);
+    }
+
+    [Test]
+    public async Task Handle_ShouldMatchTrackHistory_WhenAlbumOrArtistTitleMatches()
+    {
+        var artistId = Guid.NewGuid();
+        var albumId = Guid.NewGuid();
+        var trackId = Guid.NewGuid();
+        var artist = new MusicArtist { Id = artistId, Title = "Radiohead" };
+        var album = new MusicAlbum
+        {
+            Id = albumId,
+            Title = "OK Computer",
+            ArtistId = artistId,
+            Artist = artist
+        };
+        var track = new MusicTrack
+        {
+            Id = trackId,
+            Title = "Paranoid Android",
+            AlbumId = albumId,
+            Album = album,
+            ArtistId = artistId,
+            Artist = artist
+        };
+        _context.Medias.AddRange(artist, album, track);
+        AddSession(trackId);
+        AddSession(_movieId);
+        await _context.SaveChangesAsync();
+
+        var byArtist = await _handler.Handle(
+            new GetPlaybackHistoryQuery { Period = "all", Search = "radiohead" },
+            CancellationToken.None);
+        byArtist.Items.Should().ContainSingle();
+        byArtist.Items[0].MediaId.Should().Be(trackId);
+
+        var byAlbum = await _handler.Handle(
+            new GetPlaybackHistoryQuery { Period = "all", Search = "computer" },
+            CancellationToken.None);
+        byAlbum.Items.Should().ContainSingle();
+        byAlbum.Items[0].MediaId.Should().Be(trackId);
+
+        var typed = await _handler.Handle(
+            new GetPlaybackHistoryQuery { Period = "all", Search = "radiohead", MediaType = MediaType.Movie },
+            CancellationToken.None);
+        typed.Items.Should().BeEmpty();
+    }
+
+    private void AddSession(Guid mediaId)
+    {
+        _context.MediaPlaybackSessions.Add(new MediaPlaybackSession
+        {
+            Id = Guid.NewGuid(),
+            UserId = _userId,
+            MediaId = mediaId,
+            SessionId = Guid.NewGuid(),
+            ReferenceId = Guid.NewGuid(),
+            StartedAt = DateTime.UtcNow.AddMinutes(-10),
+            StoppedAt = DateTime.UtcNow,
+            DurationSeconds = 100,
+            WatchedDurationSeconds = 100,
+            State = PlaybackState.Ended
+        });
     }
 
     private void EnableCapability(Guid userId, Capability capability)

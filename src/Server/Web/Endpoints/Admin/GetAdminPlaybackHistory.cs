@@ -22,6 +22,7 @@ public class GetAdminPlaybackHistory : IEndpoint
             [FromQuery] string period = "all",
             [FromQuery] DateTime? from = null,
             [FromQuery] DateTime? to = null,
+            [FromQuery] string? q = null,
             CancellationToken cancellationToken = default) =>
         {
             return await sender.Send(new GetPlaybackHistoryQuery
@@ -34,7 +35,8 @@ public class GetAdminPlaybackHistory : IEndpoint
                 ShowAllUsers = true,
                 Period = period,
                 From = from,
-                To = to
+                To = to,
+                Search = q
             }, cancellationToken);
         })
         .RequireAuthorization(Policies.AdminOnly)

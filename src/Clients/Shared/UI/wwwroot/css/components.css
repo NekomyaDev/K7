@@ -1741,6 +1741,12 @@ hr.k7-menu-divider { border: none; border-top: 1px solid var(--color-border); ma
   flex-shrink: 0;
 }
 
+.data-toolbar-search {
+  width: 12rem;
+  max-width: min(18rem, 100%);
+  flex: 1 1 10rem;
+}
+
 .data-page-toolbar > .k7-button-group {
   width: max-content;
   max-width: 100%;
@@ -1776,7 +1782,8 @@ hr.k7-menu-divider { border: none; border-top: 1px solid var(--color-border); ma
   }
 
   .data-page-toolbar > .data-toolbar-sort,
-  .data-page-toolbar > .data-toolbar-field {
+  .data-page-toolbar > .data-toolbar-field,
+  .data-page-toolbar > .data-toolbar-search {
     flex: 1 1 100%;
     width: 100%;
     max-width: none;

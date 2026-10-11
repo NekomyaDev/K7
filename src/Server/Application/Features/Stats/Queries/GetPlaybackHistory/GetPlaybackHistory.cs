@@ -2,7 +2,9 @@ using K7.Server.Application.Common;
 using K7.Server.Application.Common.Exceptions;
 using K7.Server.Application.Common.Interfaces;
 using K7.Server.Application.Common.Models;
+using K7.Server.Application.Common.QueryExtensions;
 using K7.Server.Application.Common.Security;
+using K7.Server.Application.Common.Services;
 using K7.Server.Domain.Constants;
 using K7.Server.Domain.Entities.Medias;
 using K7.Server.Domain.Entities.Users;
@@ -25,11 +27,17 @@ public record GetPlaybackHistoryQuery : IRequest<PlaybackHistoryPageDto>
     public string Period { get; init; } = "month";
     public DateTime? From { get; init; }
     public DateTime? To { get; init; }
+    public string? Search { get; init; }
 }
 
-public class GetPlaybackHistoryQueryHandler(IApplicationDbContext context, IUser currentUser, IIdentityService identityService)
+public class GetPlaybackHistoryQueryHandler(
+    IApplicationDbContext context,
+    IUser currentUser,
+    IIdentityService identityService,
+    IDatabaseCapabilities databaseCapabilities)
     : IRequestHandler<GetPlaybackHistoryQuery, PlaybackHistoryPageDto>
 {
+    private const int MinSearchLength = 2;
     public async Task<PlaybackHistoryPageDto> Handle(GetPlaybackHistoryQuery request, CancellationToken cancellationToken)
     {
         var role = Roles.Guest;
@@ -123,6 +131,8 @@ public class GetPlaybackHistoryQueryHandler(IApplicationDbContext context, IUser
         {
             sessionsQuery = sessionsQuery.Where(s => s.StartedAt >= since);
         }
+
+        sessionsQuery = WhereSearchMatches(context, sessionsQuery, request.Search, databaseCapabilities.SupportsTrigramSearch);
 
         var groupedQuery = sessionsQuery
             .GroupBy(s => s.ReferenceId)
@@ -439,6 +449,32 @@ public class GetPlaybackHistoryQueryHandler(IApplicationDbContext context, IUser
             return true;
 
         return sharedProfileId is { } profileId && hostedProfileIds.Contains(profileId);
+    }
+
+    private static IQueryable<MediaPlaybackSession> WhereSearchMatches(
+        IApplicationDbContext context,
+        IQueryable<MediaPlaybackSession> sessions,
+        string? search,
+        bool supportsTrigramSearch)
+    {
+        if (string.IsNullOrWhiteSpace(search) || search.Trim().Length < MinSearchLength)
+            return sessions;
+
+        var term = MediaTextSearchHelper.BuildTitlePattern(search, supportsTrigramSearch);
+        var sortTerm = MediaTextSearchHelper.BuildSortTitlePattern(search, supportsTrigramSearch);
+
+        // One title lookup against the session media, or the parent shown with it
+        // (series, season, album, artist). History rows are already scoped by the other filters.
+        return sessions.Where(session =>
+            context.Medias.WhereTitleOrSortTitleMatches(term, sortTerm).Any(media =>
+                media.Id == session.MediaId
+                || (session.Media is SerieEpisode && (
+                    media.Id == ((SerieEpisode)session.Media).SerieId
+                    || media.Id == ((SerieEpisode)session.Media).SeasonId))
+                || (session.Media is MusicTrack && (
+                    media.Id == ((MusicTrack)session.Media).AlbumId
+                    || (((MusicTrack)session.Media).ArtistId != null && media.Id == ((MusicTrack)session.Media).ArtistId)
+                    || (((MusicTrack)session.Media).Album.ArtistId != null && media.Id == ((MusicTrack)session.Media).Album.ArtistId)))));
     }
 
     private static DateTime? GetPeriodStart(string period) => period switch

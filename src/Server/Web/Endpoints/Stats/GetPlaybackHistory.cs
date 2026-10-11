@@ -21,6 +21,7 @@ public class GetPlaybackHistory : IEndpoint
             [FromQuery] string period = "month",
             [FromQuery] DateTime? from = null,
             [FromQuery] DateTime? to = null,
+            [FromQuery] string? q = null,
             CancellationToken cancellationToken = default) =>
         {
             return await sender.Send(new GetPlaybackHistoryQuery
@@ -30,7 +31,8 @@ public class GetPlaybackHistory : IEndpoint
                 MediaType = mediaType,
                 Period = period,
                 From = from,
-                To = to
+                To = to,
+                Search = q
             }, cancellationToken);
         })
         .RequireAuthorization(Policies.GuestOrAbove)

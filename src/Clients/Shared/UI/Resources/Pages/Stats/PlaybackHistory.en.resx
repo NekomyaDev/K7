@@ -37,9 +37,9 @@
   <data name="Skipped" xml:space="preserve"><value>Skipped</value></data>
   <data name="Period" xml:space="preserve"><value>Period</value></data>
   <data name="MediaType" xml:space="preserve"><value>Media type</value></data>
-  <data name="WeekShort" xml:space="preserve"><value>Wk</value></data>
-  <data name="MonthShort" xml:space="preserve"><value>Mo</value></data>
-  <data name="YearShort" xml:space="preserve"><value>Yr</value></data>
+  <data name="WeekShort" xml:space="preserve"><value>Week</value></data>
+  <data name="MonthShort" xml:space="preserve"><value>Month</value></data>
+  <data name="YearShort" xml:space="preserve"><value>Year</value></data>
   <data name="AllTime" xml:space="preserve"><value>All</value></data>
   <data name="CustomShort" xml:space="preserve"><value>Custom</value></data>
   <data name="PickDates" xml:space="preserve"><value>Pick dates</value></data>
@@ -68,4 +68,5 @@
   <data name="DeleteSelectedSuccess" xml:space="preserve"><value>{0} playback(s) removed</value></data>
   <data name="DeleteSelectedError" xml:space="preserve"><value>Could not remove the selected playbacks</value></data>
   <data name="DeleteSelectedPartial" xml:space="preserve"><value>{0} removed, {1} failed</value></data>
+  <data name="SearchPlaceholder" xml:space="preserve"><value>Search by title...</value></data>
 </root>

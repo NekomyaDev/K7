@@ -890,7 +890,7 @@ public sealed class MockServerInfoService : IServerInfoService
     public Task<PasswordPolicyDto> GetPasswordPolicyAsync(CancellationToken cancellationToken = default) => Task.FromResult(PasswordPolicyDto.Defaults);
     public Task UpdatePasswordPolicyAsync(PasswordPolicyDto policy, CancellationToken cancellationToken = default) => Task.CompletedTask;
     public Task<WatchStatsDto?> GetWatchStatsAsync(string? mediaType = null, string period = "month", DateTime? from = null, DateTime? to = null, CancellationToken cancellationToken = default) => Task.FromResult<WatchStatsDto?>(null);
-    public Task<PlaybackHistoryPageDto?> GetPlaybackHistoryAsync(int page = 1, int pageSize = 25, string? mediaType = null, string period = "month", DateTime? from = null, DateTime? to = null, CancellationToken cancellationToken = default) => Task.FromResult<PlaybackHistoryPageDto?>(null);
+    public Task<PlaybackHistoryPageDto?> GetPlaybackHistoryAsync(int page = 1, int pageSize = 25, string? mediaType = null, string period = "month", DateTime? from = null, DateTime? to = null, string? q = null, CancellationToken cancellationToken = default) => Task.FromResult<PlaybackHistoryPageDto?>(null);
     public Task ReassignPlaybackHistoryAsync(Guid referenceId, Guid? sharedProfileId, CancellationToken cancellationToken = default) => Task.CompletedTask;
     public Task DeletePlaybackHistoryAsync(Guid referenceId, CancellationToken cancellationToken = default) => Task.CompletedTask;
     public Task ReassignAdminPlaybackHistoryAsync(Guid referenceId, Guid? sharedProfileId, CancellationToken cancellationToken = default) => Task.CompletedTask;
@@ -939,7 +939,7 @@ public sealed class MockServerInfoService : IServerInfoService
 
         return Task.FromResult<ServerMetricsHistoryDto?>(new ServerMetricsHistoryDto { Snapshots = snapshots });
     }
-    public Task<PlaybackHistoryPageDto?> GetAdminPlaybackHistoryAsync(int page = 1, int pageSize = 25, string? mediaType = null, Guid? userId = null, string period = "all", DateTime? from = null, DateTime? to = null, CancellationToken cancellationToken = default) => Task.FromResult<PlaybackHistoryPageDto?>(null);
+    public Task<PlaybackHistoryPageDto?> GetAdminPlaybackHistoryAsync(int page = 1, int pageSize = 25, string? mediaType = null, Guid? userId = null, string period = "all", DateTime? from = null, DateTime? to = null, string? q = null, CancellationToken cancellationToken = default) => Task.FromResult<PlaybackHistoryPageDto?>(null);
     public Task<WatchStatsDto?> GetAdminWatchStatsAsync(string? mediaType = null, string period = "month", Guid? userId = null, DateTime? from = null, DateTime? to = null, CancellationToken cancellationToken = default) => Task.FromResult<WatchStatsDto?>(null);
 }
 

@@ -53,6 +53,16 @@
                 }
             </K7Select>
 
+            <K7TextField TValue="string"
+                         Class="data-toolbar-search"
+                         Value="_searchText"
+                         ValueChanged="OnSearchTextChanged"
+                         Placeholder="@L["SearchPlaceholder"]"
+                         Variant="outlined"
+                         Clearable="true"
+                         DebounceInterval="300"
+                         OnDebounceIntervalElapsed="OnSearchDebounced" />
+
             <K7ButtonGroup TValue="string" Options="_periodOptions" Value="_selectedPeriod" ValueChanged="OnPeriodChanged" AriaLabel="@L["Period"]" />
             @if (_selectedPeriod == "custom")
             {

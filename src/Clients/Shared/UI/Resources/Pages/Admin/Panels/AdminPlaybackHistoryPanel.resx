@@ -37,9 +37,9 @@
   <data name="Status" xml:space="preserve"><value>Statut</value></data>
   <data name="MediaType" xml:space="preserve"><value>Type de média</value></data>
   <data name="Period" xml:space="preserve"><value>Période</value></data>
-  <data name="WeekShort" xml:space="preserve"><value>Sem.</value></data>
+  <data name="WeekShort" xml:space="preserve"><value>Semaine</value></data>
   <data name="MonthShort" xml:space="preserve"><value>Mois</value></data>
-  <data name="YearShort" xml:space="preserve"><value>An</value></data>
+  <data name="YearShort" xml:space="preserve"><value>Année</value></data>
   <data name="AllTime" xml:space="preserve"><value>Tout</value></data>
   <data name="CustomShort" xml:space="preserve"><value>Perso.</value></data>
   <data name="PickDates" xml:space="preserve"><value>Choisir les dates</value></data>
@@ -96,4 +96,5 @@
   <data name="DeleteSelectedSuccess" xml:space="preserve"><value>{0} visionnage(s) supprimé(s)</value></data>
   <data name="DeleteSelectedError" xml:space="preserve"><value>Impossible de supprimer les visionnages sélectionnés</value></data>
   <data name="DeleteSelectedPartial" xml:space="preserve"><value>{0} supprimé(s), {1} en échec</value></data>
+  <data name="SearchPlaceholder" xml:space="preserve"><value>Rechercher un titre...</value></data>
 </root>

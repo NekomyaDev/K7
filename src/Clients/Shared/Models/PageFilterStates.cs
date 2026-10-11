@@ -24,9 +24,10 @@ public sealed record AdminPlaybackHistoryFilterState(
     string MediaType,
     string Period = "all",
     string? From = null,
-    string? To = null);
+    string? To = null,
+    string? Search = null);
 
-public sealed record UserPlaybackHistoryFilterState(string MediaType, string Period, string? From = null, string? To = null);
+public sealed record UserPlaybackHistoryFilterState(string MediaType, string Period, string? From = null, string? To = null, string? Search = null);
 
 public sealed record UserWatchStatsFilterState(string MediaType, string Period, string? From = null, string? To = null);
 
