@@ -4,6 +4,6 @@
   <resheader name="version"><value>2.0</value></resheader>
   <data name="ScopeNobody" xml:space="preserve"><value>Moi uniquement</value></data>
   <data name="ScopeLocalServer" xml:space="preserve"><value>Uniquement mon serveur</value></data>
-  <data name="ScopeFederation" xml:space="preserve"><value>Serveurs fédérés</value></data>
+  <data name="ScopeFederation" xml:space="preserve"><value>Ce serveur et les serveurs fédérés</value></data>
   <data name="ScopeSpecificPeople" xml:space="preserve"><value>Personnes spécifiques</value></data>
 </root>

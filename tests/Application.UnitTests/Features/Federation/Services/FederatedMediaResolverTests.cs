@@ -199,4 +199,92 @@ public class FederatedMediaResolverTests
         result.LocalMediaId.Should().Be(_localMediaId);
         result.RemoteIndexedFileId.Should().Be(remoteFileId);
     }
+
+    [Test]
+    public async Task ResolveAsync_ShouldReturnResolvedLocal_WhenMusicBrainzReleaseIdMatches()
+    {
+        var albumId = Guid.NewGuid();
+        _context.Medias.Add(new MusicAlbum { Id = albumId, Title = "OK Computer" });
+        _context.ExternalIds.Add(new ExternalId
+        {
+            ProviderName = "musicbrainz-release",
+            Value = "release-1",
+            MediaId = albumId
+        });
+        await _context.SaveChangesAsync();
+
+        var mediaRef = new FederatedMediaRef
+        {
+            RemoteMediaId = _remoteMediaId,
+            Type = MediaType.MusicAlbum,
+            ExternalIds =
+            [
+                new PeerExternalIdDto { Provider = "musicbrainz-release", Value = "release-1" }
+            ]
+        };
+
+        var result = await _resolver.ResolveAsync(_peerServerId, mediaRef);
+
+        result.Status.Should().Be(FederatedMediaResolutionStatus.ResolvedLocal);
+        result.LocalMediaId.Should().Be(albumId);
+    }
+
+    [Test]
+    public async Task MatchesLocalMediaAsync_ShouldReturnTrue_ForEveryCopySharingTheExternalId()
+    {
+        var otherCopyId = Guid.NewGuid();
+        _context.Medias.Add(new Movie { Id = otherCopyId, Title = "Inception copy" });
+        _context.ExternalIds.Add(new ExternalId
+        {
+            ProviderName = "tmdb",
+            Value = "27205",
+            MediaId = _localMediaId
+        });
+        _context.ExternalIds.Add(new ExternalId
+        {
+            ProviderName = "TMDB",
+            Value = "27205",
+            MediaId = otherCopyId
+        });
+        await _context.SaveChangesAsync();
+
+        var mediaRef = new FederatedMediaRef
+        {
+            RemoteMediaId = _remoteMediaId,
+            Type = MediaType.Movie,
+            ExternalIds =
+            [
+                new PeerExternalIdDto { Provider = "tmdb", Value = "27205" }
+            ]
+        };
+
+        (await _resolver.MatchesLocalMediaAsync(_peerServerId, mediaRef, _localMediaId)).Should().BeTrue();
+        (await _resolver.MatchesLocalMediaAsync(_peerServerId, mediaRef, otherCopyId)).Should().BeTrue();
+    }
+
+    [Test]
+    public async Task MatchesLocalMediaAsync_ShouldReturnFalse_WhenExternalIdBelongsToAnotherMediaType()
+    {
+        var albumId = Guid.NewGuid();
+        _context.Medias.Add(new MusicAlbum { Id = albumId, Title = "Not a movie" });
+        _context.ExternalIds.Add(new ExternalId
+        {
+            ProviderName = "tmdb",
+            Value = "27205",
+            MediaId = albumId
+        });
+        await _context.SaveChangesAsync();
+
+        var mediaRef = new FederatedMediaRef
+        {
+            RemoteMediaId = _remoteMediaId,
+            Type = MediaType.Movie,
+            ExternalIds =
+            [
+                new PeerExternalIdDto { Provider = "tmdb", Value = "27205" }
+            ]
+        };
+
+        (await _resolver.MatchesLocalMediaAsync(_peerServerId, mediaRef, albumId)).Should().BeFalse();
+    }
 }

@@ -81,8 +81,8 @@ public class GetFederatedMediaReviewsQueryHandler(
 
                     foreach (var review in reviews)
                     {
-                        var resolution = await mediaResolver.ResolveAsync(peer.Id, review.Media, cancellationToken);
-                        if (resolution.LocalMediaId != request.MediaId)
+                        if (!await mediaResolver.MatchesLocalMediaAsync(
+                                peer.Id, review.Media, request.MediaId, cancellationToken))
                             continue;
 
                         var authorName = !string.IsNullOrWhiteSpace(review.Author.DisplayName)

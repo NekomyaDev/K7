@@ -86,6 +86,25 @@ public class ContentVisibilityEvaluator(
             return true;
         }
 
+        // Federation includes this server. The admin pipe only gates other servers.
+        if (ownerPeerServerId is null && await IsLocalUserAsync(viewerUserId, cancellationToken))
+        {
+            return ownerScope switch
+            {
+                VisibilityScope.Federation => true,
+                VisibilityScope.SpecificPeople => await HasMatchingGrantAsync(
+                    ownerUserId,
+                    contentType,
+                    playlistId,
+                    collectionId,
+                    targetUserId: viewerUserId,
+                    targetPeerServerId: null,
+                    targetOriginUserId: null,
+                    cancellationToken),
+                _ => false
+            };
+        }
+
         if (ownerPeerServerId is not null)
         {
             if (!await IsFederationSocialEnabledAsync(contentType, outbound: false, ownerPeerServerId, cancellationToken))
@@ -152,6 +171,17 @@ public class ContentVisibilityEvaluator(
                 cancellationToken),
             _ => false
         };
+    }
+
+    private async Task<bool> IsLocalUserAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        var viewer = await context.Users
+            .AsNoTracking()
+            .Where(u => u.Id == userId)
+            .Select(u => new { u.PeerServerId })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return viewer is not null && viewer.PeerServerId is null;
     }
 
     private async Task<bool> HasMatchingGrantAsync(

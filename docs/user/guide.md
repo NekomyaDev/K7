@@ -197,7 +197,7 @@ Album pages use the same minibar header. It stays pinned under the top menu whil
 
 ## Privacy and visibility
 
-Social sharing is **opt-in**. By default, social content scopes are **Nobody**: nothing is shared until **you** widen a scope. The administrator **cannot force you to share** (there is no server-wide "everyone must share history/reviews" switch). They can still limit which libraries or profiles you may access - that is access control, not forced social opt-in. Admin federation social policy and per-peer social toggles only open the pipe; each user must still set **Settings -> Social** (Share and View) to Federation (or Specific people) for reviews and other social content to cross peers.
+Social sharing is **opt-in**. By default, social content scopes are **Nobody**: nothing is shared until **you** widen a scope. The administrator **cannot force you to share** (there is no server-wide "everyone must share history/reviews" switch). They can still limit which libraries or profiles you may access - that is access control, not forced social opt-in. Admin federation social policy and per-peer social toggles only open the pipe; each user must still set **Settings -> Social** (Share and View) to Federation (or Specific people) for reviews and other social content to cross peers. Share is set on the server that owns the review. View is set on the server where you want to read it. A review is shown on a media page when that server recognizes the same title (TMDB, IMDB, TVDB, MusicBrainz, or the peered file).
 
 Configure this under **Settings -> Social**. K7 separates **what you share** from **what you want to see**, for reviews, collections, playlists, dynamic playlists, and playback history. You can also blur reviews until you have watched the media.
 
@@ -205,7 +205,7 @@ Configure this under **Settings -> Social**. K7 separates **what you share** fro
 |---|---|
 | Nobody | Only yours (default) |
 | Local server | Same K7 instance |
-| Federation | Directly peered servers only (not friends-of-friends) |
+| Federation | This server and directly peered servers (not friends-of-friends). The admin pipe is only required for the other servers |
 | Specific people | People you pick |
 
 Per-item visibility on playlists or collections can tighten or target sharing further when the UI offers it.

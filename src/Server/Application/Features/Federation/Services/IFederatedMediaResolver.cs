@@ -29,4 +29,10 @@ public interface IFederatedMediaResolver
         Guid peerServerId,
         IReadOnlyList<FederatedMediaRef> mediaRefs,
         CancellationToken cancellationToken = default);
+
+    Task<bool> MatchesLocalMediaAsync(
+        Guid peerServerId,
+        FederatedMediaRef mediaRef,
+        Guid localMediaId,
+        CancellationToken cancellationToken = default);
 }

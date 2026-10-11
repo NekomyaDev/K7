@@ -132,6 +132,36 @@ public class ContentVisibilityEvaluatorTests
     }
 
     [Test]
+    public async Task CanViewAsync_ShouldReturnTrue_WhenScopeIsFederation_AndViewerIsLocal_EvenIfPolicyDisabled()
+    {
+        _policyService.GetAsync(Arg.Any<CancellationToken>())
+            .Returns(new FederationSocialPolicyDto { Enabled = false });
+
+        var result = await _evaluator.CanViewAsync(
+            _viewerId,
+            _ownerId,
+            FederationContentType.Reviews,
+            VisibilityScope.Federation);
+
+        result.Should().BeTrue();
+    }
+
+    [Test]
+    public async Task CanViewAsync_ShouldReturnFalse_WhenScopeIsFederation_AndViewerIsFederated_AndPolicyDisabled()
+    {
+        _policyService.GetAsync(Arg.Any<CancellationToken>())
+            .Returns(new FederationSocialPolicyDto { Enabled = false });
+
+        var result = await _evaluator.CanViewAsync(
+            _federatedViewerId,
+            _ownerId,
+            FederationContentType.Reviews,
+            VisibilityScope.Federation);
+
+        result.Should().BeFalse();
+    }
+
+    [Test]
     public async Task CanViewAsync_ShouldReturnTrue_WhenSpecificPeopleGrantMatchesLocalUser()
     {
         ConfigureEnabledPolicy(FederationContentType.Reviews);
