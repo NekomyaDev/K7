@@ -563,7 +563,7 @@ public class GetDiagnosticItemsQueryHandler : IRequestHandler<GetDiagnosticItems
             if (!m.HasExternalIds && isEnrichableMedia) issues.Add(DiagnosticIssue.MissingExternalId);
             // Episodes and seasons do not carry genres. Those live on the serie, and the
             // metadata editor does not show a genre field for them.
-            if (m.Type is not (MediaType.SerieEpisode or MediaType.SerieSeason))
+            if (m.Type is not (MediaType.SerieEpisode or MediaType.SerieSeason or MediaType.MusicArtist))
             {
                 if (!m.HasExternalIds && !isEnrichableMedia && m.GenreCount == 0) issues.Add(DiagnosticIssue.MissingMetadata);
                 if (m.HasExternalIds && m.GenreCount == 0) issues.Add(DiagnosticIssue.MissingMetadata);
@@ -753,6 +753,7 @@ public class GetDiagnosticItemsQueryHandler : IRequestHandler<GetDiagnosticItems
                         || m.MetadataTags.Count(mt => mt.MetadataTag.Kind == MetadataTagKind.Genre) == 0
                             && m.Type != MediaType.SerieEpisode
                             && m.Type != MediaType.SerieSeason
+                            && m.Type != MediaType.MusicArtist
                         || _context.Medias.OfType<MusicTrack>().Any(t => t.Id == m.Id && t.AudioAnalysis == null)
                         || (m.Type == MediaType.Movie || m.Type == MediaType.Serie)
                             && (!_context.MetadataPictures.Any(p => p.MediaId == m.Id && p.Type == MetadataPictureType.Poster)
@@ -814,7 +815,7 @@ public class GetDiagnosticItemsQueryHandler : IRequestHandler<GetDiagnosticItems
         if (activeIssues.Contains(DiagnosticIssue.MissingMetadata))
         {
             Add(medias
-                .Where(m => m.Type != MediaType.SerieEpisode && m.Type != MediaType.SerieSeason)
+                .Where(m => m.Type != MediaType.SerieEpisode && m.Type != MediaType.SerieSeason && m.Type != MediaType.MusicArtist)
                 .Where(m => m.MetadataTags.Count(mt => mt.MetadataTag.Kind == MetadataTagKind.Genre) == 0)
                 .Where(m => m.ExternalIds.Any()
                     || m.Type != MediaType.Movie && m.Type != MediaType.Serie && m.Type != MediaType.MusicAlbum)
@@ -1152,8 +1153,8 @@ public class GetDiagnosticItemsQueryHandler : IRequestHandler<GetDiagnosticItems
                 a.Id,
                 a.Title,
                 a.LastMetadataRefreshedAt,
-                HasMembers = a.PersonRoles.Any(),
-                HasExternalIds = a.ExternalIds.Any()
+                a.ReleaseDate,
+                HasMembers = a.PersonRoles.Any()
             })
             .ToListAsync(cancellationToken);
 
@@ -1184,7 +1185,7 @@ public class GetDiagnosticItemsQueryHandler : IRequestHandler<GetDiagnosticItems
         {
             var issues = new List<DiagnosticIssue>();
             if (!a.HasMembers) issues.Add(DiagnosticIssue.MissingMembers);
-            if (!a.HasExternalIds) issues.Add(DiagnosticIssue.MissingMetadata);
+            if (a.ReleaseDate is null) issues.Add(DiagnosticIssue.MissingMetadata);
 
             if (issues.Count == 0) return null;
 
@@ -1228,7 +1229,7 @@ public class GetDiagnosticItemsQueryHandler : IRequestHandler<GetDiagnosticItems
 
         var artists = _context.Medias.OfType<MusicArtist>()
             .AsNoTracking()
-            .Where(a => !a.PersonRoles.Any() || !a.ExternalIds.Any());
+            .Where(a => !a.PersonRoles.Any() || a.ReleaseDate == null);
 
         if (request.LibraryId.HasValue)
         {

@@ -210,10 +210,10 @@ public class DiagnosticIssueEntityResolver(
             })
             .ToListAsync(cancellationToken);
 
-        return medias
+        var missing = medias
             .Where(m =>
             {
-                if (m.Type is MediaType.SerieEpisode or MediaType.SerieSeason)
+                if (m.Type is MediaType.SerieEpisode or MediaType.SerieSeason or MediaType.MusicArtist)
                     return false;
 
                 var isEnrichableMedia = m.Type is MediaType.Movie or MediaType.Serie or MediaType.MusicAlbum;
@@ -223,6 +223,32 @@ public class DiagnosticIssueEntityResolver(
             })
             .Select(m => m.Id)
             .ToList();
+
+        var artistsMissingFormationDate = await GetMusicArtistIdsMissingFormationDateAsync(libraryId, cancellationToken);
+        return missing.Concat(artistsMissingFormationDate).Distinct().ToList();
+    }
+
+    private async Task<List<Guid>> GetMusicArtistIdsMissingFormationDateAsync(
+        Guid? libraryId,
+        CancellationToken cancellationToken)
+    {
+        var artists = await context.Medias
+            .AsNoTracking()
+            .OfType<MusicArtist>()
+            .Where(a => a.ReleaseDate == null)
+            .Select(a => a.Id)
+            .ToListAsync(cancellationToken);
+
+        if (!libraryId.HasValue)
+            return artists;
+
+        return await (
+            from album in context.Medias.OfType<MusicAlbum>()
+            where album.ArtistId != null && artists.Contains(album.ArtistId.Value)
+            join f in context.IndexedFiles on album.Id equals f.MediaId
+            where f.LibraryId == libraryId.Value
+            select album.ArtistId!.Value
+        ).Distinct().ToListAsync(cancellationToken);
     }
 
     private async Task<List<Guid>> GetMediaIdsMissingExternalIdAsync(

@@ -40,7 +40,7 @@
   <data name="Def_DuplicateExternalId" xml:space="preserve"><value>Two local medias with the same peer share the same provider id. The same recording on different albums is not counted.</value></data>
   <data name="Def_SuspectedDuplicateMedia" xml:space="preserve"><value>Two medias of the same type share a normalized title and year in one library. Noisier (homonyms exist).</value></data>
   <data name="Def_MissingExternalId" xml:space="preserve"><value>The media has no provider id (TMDb, TVDB, MusicBrainz...). Identification likely failed.</value></data>
-  <data name="Def_MissingMetadata" xml:space="preserve"><value>Genres are missing on a movie, series, album, or track. Episodes and seasons are not included: genres belong to the series.</value></data>
+  <data name="Def_MissingMetadata" xml:space="preserve"><value>Genres are missing on a movie, series, album, or track. An artist with no formation date is included too. Episodes and seasons are not.</value></data>
   <data name="Def_MissingPictures" xml:space="preserve"><value>Expected posters, covers, or artwork are missing for this media.</value></data>
   <data name="Def_StaleMetadata" xml:space="preserve"><value>Metadata has not been refreshed longer than the configured threshold.</value></data>
   <data name="Def_MissingMembers" xml:space="preserve"><value>A music artist has no person credits / band members (PersonRoles) yet.</value></data>

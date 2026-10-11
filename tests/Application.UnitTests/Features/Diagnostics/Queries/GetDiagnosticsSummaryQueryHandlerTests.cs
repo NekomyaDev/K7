@@ -259,6 +259,34 @@ public class GetDiagnosticsSummaryQueryHandlerTests
     }
 
     [Test]
+    public async Task Handle_ShouldCountArtistsMissingFormationDate_WhenAlbumHasAFile()
+    {
+        var libraryId = SeedMusicLibrary();
+        var missingId = Guid.NewGuid();
+        var datedId = Guid.NewGuid();
+        var unlinkedId = Guid.NewGuid();
+        var missingAlbumId = Guid.NewGuid();
+        var datedAlbumId = Guid.NewGuid();
+
+        _context.Medias.AddRange(
+            new MusicArtist { Id = missingId, Title = "No Date" },
+            new MusicArtist { Id = datedId, Title = "Dated", ReleaseDate = new DateOnly(1990, 5, 1) },
+            new MusicArtist { Id = unlinkedId, Title = "No File" },
+            new MusicAlbum { Id = missingAlbumId, Title = "A", ArtistId = missingId },
+            new MusicAlbum { Id = datedAlbumId, Title = "B", ArtistId = datedId });
+
+        AddMusicFile(libraryId, missingAlbumId, "/music/a/track.flac", 1);
+        AddMusicFile(libraryId, datedAlbumId, "/music/b/track.flac", 2);
+        await _context.SaveChangesAsync();
+
+        var summaries = await _handler.Handle(new GetDiagnosticsSummaryQuery(), CancellationToken.None);
+        var summary = summaries.Should().ContainSingle().Subject;
+
+        summary.LibraryId.Should().Be(libraryId);
+        summary.MediaMissingMetadataCount.Should().Be(1);
+    }
+
+    [Test]
     public async Task Handle_ShouldCountMissingHlsSegments_ForLocalTransmuxLibraries()
     {
         var libraryId = SeedMovieLibrary();
@@ -396,6 +424,31 @@ public class GetDiagnosticsSummaryQueryHandlerTests
         return libraryId;
     }
 
+    private Guid SeedMusicLibrary()
+    {
+        var groupId = Guid.NewGuid();
+        var libraryId = Guid.NewGuid();
+        _context.LibraryGroups.Add(new LibraryGroup
+        {
+            Id = groupId,
+            Title = "Music",
+            MediaType = LibraryMediaType.Music
+        });
+        _context.Libraries.Add(new Library
+        {
+            Id = libraryId,
+            LibraryGroupId = groupId,
+            Title = "Music",
+            MediaType = LibraryMediaType.Music,
+            RootPath = "/music",
+            MetadataProviderName = "musicbrainz",
+            MetadataLanguage = "fr",
+            MetadataFallbackLanguage = "en"
+        });
+        _context.SaveChanges();
+        return libraryId;
+    }
+
     private Guid SeedSerieLibrary()
     {
         var groupId = Guid.NewGuid();
@@ -421,6 +474,22 @@ public class GetDiagnosticsSummaryQueryHandlerTests
         });
         _context.SaveChanges();
         return libraryId;
+    }
+
+    private void AddMusicFile(Guid libraryId, Guid albumId, string path, uint hash)
+    {
+        _context.IndexedFiles.Add(new IndexedFile
+        {
+            Id = Guid.NewGuid(),
+            LibraryId = libraryId,
+            MediaId = albumId,
+            Name = Path.GetFileNameWithoutExtension(path),
+            Extension = Path.GetExtension(path),
+            Path = path,
+            ParentDirectory = Path.GetDirectoryName(path),
+            Hash = hash,
+            Size = 1
+        });
     }
 
     private void AddProbedMovieFile(Guid libraryId, string path)

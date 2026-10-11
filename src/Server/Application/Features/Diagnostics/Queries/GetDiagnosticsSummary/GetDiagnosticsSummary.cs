@@ -381,6 +381,7 @@ public class GetDiagnosticsSummaryQueryHandler : IRequestHandler<GetDiagnosticsS
             where m.ExternalIds.Any()
                 && m.Type != MediaType.SerieEpisode
                 && m.Type != MediaType.SerieSeason
+                && m.Type != MediaType.MusicArtist
                 && !m.MetadataTags.Any(mt => mt.MetadataTag.Kind == MetadataTagKind.Genre)
             select new { p.LibraryId, p.MediaId }
         )
@@ -389,7 +390,27 @@ public class GetDiagnosticsSummaryQueryHandler : IRequestHandler<GetDiagnosticsS
             .Select(g => new { LibraryId = g.Key, Count = g.Count() })
             .ToListAsync(cancellationToken);
 
-        return counts.ToDictionary(x => x.LibraryId, x => x.Count);
+        var byLibrary = counts.ToDictionary(x => x.LibraryId, x => x.Count);
+
+        var artistCounts = await (
+            from artist in _context.Medias.OfType<MusicArtist>().AsNoTracking()
+            where artist.ReleaseDate == null
+            join album in _context.Medias.OfType<MusicAlbum>().AsNoTracking()
+                on artist.Id equals album.ArtistId
+            join file in _context.IndexedFiles.AsNoTracking() on album.Id equals file.MediaId
+            join library in _context.Libraries.AsNoTracking() on file.LibraryId equals library.Id
+            where library.PeerServerId == null
+            select new { artist.Id, file.LibraryId }
+        )
+            .Distinct()
+            .GroupBy(x => x.LibraryId)
+            .Select(g => new { LibraryId = g.Key, Count = g.Select(x => x.Id).Distinct().Count() })
+            .ToListAsync(cancellationToken);
+
+        foreach (var row in artistCounts)
+            byLibrary[row.LibraryId] = byLibrary.GetValueOrDefault(row.LibraryId) + row.Count;
+
+        return byLibrary;
     }
 
     private async Task<Dictionary<Guid, int>> CountStaleMetadataByLibraryAsync(

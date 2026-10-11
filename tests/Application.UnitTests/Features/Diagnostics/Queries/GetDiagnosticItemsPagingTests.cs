@@ -385,6 +385,32 @@ public class GetDiagnosticItemsPagingTests
         result.Items.Select(i => i.EntityId).Should().BeEquivalentTo([movieId]);
     }
 
+    [Test]
+    public async Task Handle_ShouldFlagArtistMissingMetadata_OnlyWhenFormationDateIsMissing()
+    {
+        var missing = new MusicArtist { Id = Guid.NewGuid(), Title = "No Date" };
+        var dated = new MusicArtist
+        {
+            Id = Guid.NewGuid(),
+            Title = "Dated",
+            ReleaseDate = new DateOnly(1990, 5, 1)
+        };
+        _context.Medias.AddRange(missing, dated);
+        await _context.SaveChangesAsync();
+
+        var result = await _handler.Handle(
+            new GetDiagnosticItemsQuery
+            {
+                EntityType = DiagnosticEntityType.Media,
+                Issue = DiagnosticIssue.MissingMetadata,
+                PageNumber = 1,
+                PageSize = 20
+            },
+            CancellationToken.None);
+
+        result.Items.Select(i => i.EntityId).Should().BeEquivalentTo([missing.Id]);
+    }
+
     private void SeedLibrary()
     {
         _libraryId = Guid.NewGuid();
