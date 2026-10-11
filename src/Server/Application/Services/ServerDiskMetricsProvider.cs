@@ -43,66 +43,61 @@ public sealed class ServerDiskMetricsProvider(
         if (monitoredPaths.Count == 0)
             return [];
 
-        var rootDriveKey = GetDriveKey(monitoredPaths[0].ResolvedPath);
-        var volumesByDrive = new Dictionary<string, (DriveInfo Drive, List<string> Sources)>(StringComparer.OrdinalIgnoreCase);
+        // On Linux, Path.GetPathRoot is always "/". Match the mount table so bind-mounted
+        // library disks are reported separately, and collapse mounts that share a device.
+        var mounts = OperatingSystem.IsWindows() ? [] : ReadMounts();
+        var groups = GroupMonitoredPaths(monitoredPaths, path => MatchPath(path, mounts));
+        if (groups.Count == 0)
+            return [];
 
-        foreach (var (label, resolvedPath) in monitoredPaths)
+        var volumes = new List<ServerDiskVolumeDto>(groups.Count);
+        foreach (var group in groups)
         {
             try
             {
-                var drive = GetDriveForPath(resolvedPath);
-                if (drive is null || !drive.IsReady || drive.TotalSize <= 0)
+                var drive = new DriveInfo(group.Match.QueryPath);
+                if (!drive.IsReady || drive.TotalSize <= 0)
                     continue;
 
-                var driveKey = GetDriveKey(resolvedPath);
-                if (driveKey is null)
-                    continue;
-
-                if (!volumesByDrive.TryGetValue(driveKey, out var entry))
-                {
-                    volumesByDrive[driveKey] = (drive, [label]);
-                    continue;
-                }
-
-                if (!entry.Sources.Contains(label, StringComparer.OrdinalIgnoreCase))
-                    entry.Sources.Add(label);
+                volumes.Add(ToVolumeDto(drive, group));
             }
             catch (Exception ex)
             {
-                logger.LogDebug(ex, "Skipping monitored path {Label} at {Path}", label, resolvedPath);
+                logger.LogDebug(ex, "Skipping disk volume at {Path}", group.Match.QueryPath);
             }
         }
 
-        if (volumesByDrive.Count == 0)
-            return [];
-
-        var volumes = new List<ServerDiskVolumeDto>(volumesByDrive.Count);
-
-        if (rootDriveKey is not null && volumesByDrive.TryGetValue(rootDriveKey, out var rootEntry))
-            volumes.Add(ToVolumeDto(rootEntry.Drive, rootEntry.Sources, isRoot: true));
-
-        foreach (var (driveKey, entry) in volumesByDrive.OrderBy(v => v.Key, StringComparer.OrdinalIgnoreCase))
-        {
-            if (driveKey == rootDriveKey)
-                continue;
-
-            volumes.Add(ToVolumeDto(entry.Drive, entry.Sources, isRoot: false));
-        }
-
         return volumes;
+    }
+
+    private IReadOnlyList<UnixMountTable.Mount> ReadMounts()
+    {
+        try
+        {
+            var mounts = UnixMountTable.Read();
+            if (mounts.Count == 0)
+                logger.LogDebug("Mount table unavailable. Disk metrics fall back to each monitored path.");
+
+            return mounts;
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "Failed to read mount table for disk metrics");
+            return [];
+        }
     }
 
     private List<MonitoredPath> GetMonitoredPaths()
     {
         var paths = new List<MonitoredPath>
         {
-            new("Application", ResolvePath(AppContext.BaseDirectory))
+            new("Application", ResolvePath(AppContext.BaseDirectory), IsLibrary: false)
         };
 
-        AddConfiguredPath(paths, "Config", _paths.Config);
-        AddConfiguredPath(paths, "Metadatas", _paths.Metadatas);
-        AddConfiguredPath(paths, "Logs", _paths.Logs);
-        AddConfiguredPath(paths, "Transcoding", _paths.Transcoding);
+        AddConfiguredPath(paths, "Config", _paths.Config, isLibrary: false);
+        AddConfiguredPath(paths, "Metadatas", _paths.Metadatas, isLibrary: false);
+        AddConfiguredPath(paths, "Logs", _paths.Logs, isLibrary: false);
+        AddConfiguredPath(paths, "Transcoding", _paths.Transcoding, isLibrary: false);
 
         try
         {
@@ -114,7 +109,7 @@ public sealed class ServerDiskMetricsProvider(
                 .ToList();
 
             foreach (var library in libraries)
-                AddConfiguredPath(paths, library.Title, library.RootPath!);
+                AddConfiguredPath(paths, library.Title, library.RootPath!, isLibrary: true);
         }
         catch (Exception ex)
         {
@@ -124,16 +119,23 @@ public sealed class ServerDiskMetricsProvider(
         return paths;
     }
 
-    private static void AddConfiguredPath(List<MonitoredPath> paths, string label, string path)
+    private static void AddConfiguredPath(List<MonitoredPath> paths, string label, string path, bool isLibrary)
     {
         var resolved = ResolvePath(path);
         if (string.IsNullOrWhiteSpace(resolved))
             return;
 
-        if (paths.Any(p => string.Equals(p.ResolvedPath, resolved, StringComparison.OrdinalIgnoreCase)))
-            return;
+        var existingIndex = paths.FindIndex(p =>
+            string.Equals(p.ResolvedPath, resolved, StringComparison.OrdinalIgnoreCase));
+        if (existingIndex >= 0)
+        {
+            if (isLibrary && !paths[existingIndex].IsLibrary && !string.IsNullOrWhiteSpace(label))
+                paths[existingIndex] = paths[existingIndex] with { Label = label, IsLibrary = true };
 
-        paths.Add(new MonitoredPath(label, resolved));
+            return;
+        }
+
+        paths.Add(new MonitoredPath(label, resolved, isLibrary));
     }
 
     private static string ResolvePath(string path)
@@ -151,54 +153,172 @@ public sealed class ServerDiskMetricsProvider(
         }
     }
 
-    private static ServerDiskVolumeDto ToVolumeDto(DriveInfo drive, IReadOnlyList<string> sources, bool isRoot)
+    internal static IReadOnlyList<VolumeGroup> GroupMonitoredPaths(
+        IReadOnlyList<MonitoredPath> paths,
+        Func<string, VolumeMatch?> matchPath)
+    {
+        if (paths.Count == 0)
+            return [];
+
+        var rootMatch = matchPath(paths[0].ResolvedPath);
+        var rootKey = rootMatch?.Key;
+        var groups = new Dictionary<string, VolumeGroup>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var path in paths)
+        {
+            var match = matchPath(path.ResolvedPath);
+            if (match is null)
+                continue;
+
+            if (!groups.TryGetValue(match.Value.Key, out var group))
+            {
+                group = new VolumeGroup(match.Value)
+                {
+                    IsRoot = rootKey is not null
+                        && string.Equals(match.Value.Key, rootKey, StringComparison.OrdinalIgnoreCase)
+                };
+                groups[match.Value.Key] = group;
+            }
+
+            if (!path.IsLibrary || string.IsNullOrWhiteSpace(path.Label))
+                continue;
+
+            var alreadyListed = group.Libraries.Any(library =>
+                string.Equals(library.Label, path.Label, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(library.DisplayRoot, match.Value.DisplayRoot, StringComparison.Ordinal));
+            if (alreadyListed)
+                continue;
+
+            group.Libraries.Add(new LibraryMount(path.Label, match.Value.DisplayRoot));
+        }
+
+        var ordered = new List<VolumeGroup>(groups.Count);
+        if (rootKey is not null && groups.TryGetValue(rootKey, out var rootGroup))
+            ordered.Add(rootGroup);
+
+        foreach (var group in groups.Values
+            .Where(group => rootKey is null || !string.Equals(group.Match.Key, rootKey, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(group => group.Match.DisplayRoot, StringComparer.OrdinalIgnoreCase))
+        {
+            ordered.Add(group);
+        }
+
+        return ordered;
+    }
+
+    internal static VolumeMatch? MatchPath(string path, IReadOnlyList<UnixMountTable.Mount> mounts)
+    {
+        if (OperatingSystem.IsWindows())
+            return MatchWindowsPath(path);
+
+        return MatchUnixPath(path, mounts);
+    }
+
+    internal static VolumeMatch? MatchWindowsPath(string path)
+    {
+        var root = Path.GetPathRoot(path);
+        if (string.IsNullOrEmpty(root))
+            return null;
+
+        var display = root.TrimEnd('\\', '/');
+        if (display.Length == 0)
+            display = root;
+
+        return new VolumeMatch(display, root, display);
+    }
+
+    internal static VolumeMatch? MatchUnixPath(string path, IReadOnlyList<UnixMountTable.Mount> mounts)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return null;
+
+        var mount = UnixMountTable.FindBest(mounts, path);
+        if (mount is not null)
+            return new VolumeMatch(mount.Value.DeviceId, mount.Value.MountPoint, mount.Value.MountPoint);
+
+        var root = Path.GetPathRoot(path);
+        if (string.IsNullOrEmpty(root))
+            return null;
+
+        var normalized = UnixMountTable.NormalizeMountPoint(path);
+        return new VolumeMatch(normalized, normalized, normalized);
+    }
+
+    private static ServerDiskVolumeDto ToVolumeDto(DriveInfo drive, VolumeGroup group)
     {
         var totalGb = drive.TotalSize / (1024d * 1024 * 1024);
         var freeGb = drive.AvailableFreeSpace / (1024d * 1024 * 1024);
         var usedGb = totalGb - freeGb;
         var freePercent = totalGb > 0 ? freeGb / totalGb * 100 : 0;
-        var root = drive.Name.TrimEnd('\\', '/');
+        string? volumeLabel;
+        try
+        {
+            volumeLabel = drive.VolumeLabel;
+        }
+        catch (Exception)
+        {
+            volumeLabel = null;
+        }
 
         return new ServerDiskVolumeDto
         {
-            Label = BuildLabel(drive, sources, root, isRoot),
+            Label = BuildLabel(volumeLabel, group),
             UsedGb = Math.Round(usedGb, 1),
             TotalGb = Math.Round(totalGb, 1),
             FreePercent = Math.Round(freePercent, 1)
         };
     }
 
-    private static string BuildLabel(DriveInfo drive, IReadOnlyList<string> sources, string root, bool isRoot)
+    internal static string BuildLabel(string? volumeLabel, VolumeGroup group)
     {
-        if (isRoot && !string.IsNullOrWhiteSpace(drive.VolumeLabel))
-            return $"{drive.VolumeLabel} ({root})";
+        var libraries = group.Libraries;
+        if (libraries.Count == 1)
+            return $"{libraries[0].Label} ({libraries[0].DisplayRoot})";
 
-        if (sources.Count == 1)
-            return $"{sources[0]} ({root})";
+        if (libraries.Count > 1)
+        {
+            var sameRoot = libraries
+                .Select(library => library.DisplayRoot)
+                .Distinct(StringComparer.Ordinal)
+                .Count() == 1;
+            if (sameRoot)
+            {
+                var names = string.Join(", ", libraries.Select(library => library.Label));
+                return $"{names} ({libraries[0].DisplayRoot})";
+            }
 
-        if (!string.IsNullOrWhiteSpace(drive.VolumeLabel))
-            return $"{drive.VolumeLabel} ({root})";
+            return string.Join(", ", libraries.Select(library => $"{library.Label} ({library.DisplayRoot})"));
+        }
+
+        var root = string.IsNullOrEmpty(group.Match.DisplayRoot) ? "/" : group.Match.DisplayRoot;
+        if (HasDistinctVolumeLabel(volumeLabel, root))
+            return $"{volumeLabel} ({root})";
+
+        if (group.IsRoot)
+            return $"Runtime ({root})";
 
         return root;
     }
 
-    private static DriveInfo? GetDriveForPath(string path)
+    private static bool HasDistinctVolumeLabel(string? volumeLabel, string root)
     {
-        var root = Path.GetPathRoot(path);
-        if (string.IsNullOrEmpty(root))
-            return null;
+        if (string.IsNullOrWhiteSpace(volumeLabel))
+            return false;
 
-        return new DriveInfo(root);
+        return !string.Equals(volumeLabel, root, StringComparison.Ordinal)
+            && volumeLabel != "/";
     }
+}
 
-    private static string? GetDriveKey(string path)
-    {
-        var root = Path.GetPathRoot(path);
-        if (string.IsNullOrEmpty(root))
-            return null;
+internal readonly record struct MonitoredPath(string Label, string ResolvedPath, bool IsLibrary);
 
-        return root.TrimEnd('\\', '/');
-    }
+internal readonly record struct VolumeMatch(string Key, string QueryPath, string DisplayRoot);
 
-    private readonly record struct MonitoredPath(string Label, string ResolvedPath);
+internal readonly record struct LibraryMount(string Label, string DisplayRoot);
+
+internal sealed class VolumeGroup(VolumeMatch match)
+{
+    public VolumeMatch Match { get; } = match;
+    public List<LibraryMount> Libraries { get; } = [];
+    public bool IsRoot { get; set; }
 }

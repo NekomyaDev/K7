@@ -23,8 +23,10 @@
   <data name="Subtitle" xml:space="preserve"><value>État du serveur, flux en cours et espace disque.</value></data>
   <data name="OnlineUsersKpi" xml:space="preserve"><value>Utilisateurs en ligne</value></data>
   <data name="DiskSpaceTitle" xml:space="preserve"><value>Espace disque</value></data>
-  <data name="DiskVolumeUsage" xml:space="preserve"><value>{0} Go utilisés / {1} Go</value></data>
-  <data name="DiskVolumeFree" xml:space="preserve"><value>{0} Go libres ({1} %)</value></data>
+  <data name="DiskVolumeUsage" xml:space="preserve"><value>{0} {1} utilisés / {2} {3}</value></data>
+  <data name="DiskVolumeFree" xml:space="preserve"><value>{0} {2} libres ({1} %)</value></data>
+  <data name="DiskUnitGb" xml:space="preserve"><value>Go</value></data>
+  <data name="DiskUnitTb" xml:space="preserve"><value>To</value></data>
   <data name="NoDiskVolumesYet" xml:space="preserve"><value>Aucun volume détecté</value></data>
   <data name="DiagnosticsKpi" xml:space="preserve"><value>Diagnostic</value></data>
   <data name="BackgroundTasksKpi" xml:space="preserve"><value>Tâches actives</value></data>
