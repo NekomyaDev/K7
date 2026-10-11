@@ -2,6 +2,7 @@ using K7.Clients.Shared.Enums;
 using K7.Clients.Shared.Interfaces;
 using K7.Clients.Shared.Models;
 using K7.Clients.Shared.UI.Components;
+using K7.Clients.Shared.UI.Helpers;
 using K7.Clients.Shared.UI.Components.Dialogs;
 using K7.Server.Domain.Enums;
 using K7.Shared.Dtos.Entities;
@@ -49,6 +50,18 @@ public partial class PlaylistDetail
 
     private bool _isMusicPlaylist => _playlist?.MediaType is MediaType.MusicTrack;
     private bool _showHeaderPlaceholder => _items.Count == 0;
+    private bool ShowPosterGrid =>
+        _playlist?.MediaType is MediaType.Movie or MediaType.SerieEpisode;
+
+    private MediaCardVariant GridCardVariant =>
+        _playlist is null
+            ? MediaCardVariant.Poster
+            : MediaCardLayout.VariantForBrowseMediaType(_playlist.MediaType);
+
+    private float? GridAspectRatio =>
+        ShowPosterGrid ? MediaCardLayout.GridAspectRatio(GridCardVariant) : null;
+
+    private int GridItemWidth => MediaCardLayout.GridItemWidth(GridCardVariant);
 
     internal sealed record PlaylistBrowseRow(PlaylistItemViewModel Item, int Index)
     {
@@ -184,6 +197,8 @@ public partial class PlaylistDetail
             ?? item.Pictures?.FirstOrDefault(p => p.Type == MetadataPictureType.Still))?.DominantColor,
         Duration = item.Duration ?? 0,
         UserRating = item.UserRating,
+        Watched = item.UserState?.IsCompleted ?? false,
+        Progress = item.UserState?.ProgressPercentage ?? 0,
         IsPlaying = Audio.CurrentTrack?.MediaId == item.MediaId
     };
 
@@ -197,7 +212,9 @@ public partial class PlaylistDetail
                 MediaType = MediaType.Movie,
                 Title = item.Title,
                 PictureUrl = item.CoverUrl,
-                UserRating = item.UserRating
+                UserRating = item.UserRating,
+                Watched = item.Watched,
+                Progress = item.Progress
             },
             MediaType.SerieEpisode => new MediaCardViewModel
             {
@@ -206,10 +223,33 @@ public partial class PlaylistDetail
                 MediaType = MediaType.SerieEpisode,
                 Title = item.Title,
                 PictureUrl = item.CoverUrl,
-                UserRating = item.UserRating
+                UserRating = item.UserRating,
+                Watched = item.Watched,
+                Progress = item.Progress
             },
             _ => null
         };
+
+    private static MediaCardVariant GetCardVariant(MediaCardViewModel item) =>
+        item.Kind == MediaCardKind.Episode ? MediaCardVariant.Backdrop : MediaCardVariant.Poster;
+
+    private EventCallback GetActivationCallback(PlaylistItemViewModel item) =>
+        GetItemHref(item) is null
+            ? EventCallback.Factory.Create(this, () => OnItemActivated(item))
+            : default;
+
+    private void OnItemWatchStateChanged(MediaCardViewModel? vm)
+    {
+        if (vm is null)
+            return;
+
+        var item = _items.FirstOrDefault(i => i.MediaId.ToString() == vm.Id);
+        if (item is null)
+            return;
+
+        item.Watched = vm.Watched;
+        item.Progress = vm.Progress;
+    }
 
     private string? GetItemHref(PlaylistItemViewModel item) =>
         _playlist?.MediaType switch
@@ -455,6 +495,8 @@ public partial class PlaylistDetail
         public string? CoverDominantColor { get; init; }
         public double Duration { get; init; }
         public int? UserRating { get; init; }
+        public bool Watched { get; set; }
+        public double Progress { get; set; }
         public double? Bpm { get; init; }
         public string? MusicalKey { get; init; }
         public double? Energy { get; init; }

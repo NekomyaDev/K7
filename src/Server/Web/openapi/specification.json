@@ -20952,6 +20952,16 @@
             ],
             "format": "int32"
           },
+          "userState": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UserMediaStateDto"
+              }
+            ]
+          },
           "pictures": {
             "type": [
               "null",

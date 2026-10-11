@@ -48,6 +48,17 @@ public partial class CollectionDetailPage
 
     private bool _showHeaderPlaceholder => _browseRows.Count == 0;
 
+    private MediaCardVariant GridCardVariant =>
+        _collection?.MediaType is { } mediaType
+            ? MediaCardLayout.VariantForBrowseMediaType(mediaType)
+            : MediaCardVariant.Poster;
+
+    private float GridAspectRatio => MediaCardLayout.GridAspectRatio(GridCardVariant);
+
+    private int GridItemWidth => MediaCardLayout.GridItemWidth(GridCardVariant);
+
+    private bool EpisodeStills => _collection?.MediaType == MediaType.SerieEpisode;
+
     private IReadOnlyList<string>? JumpLabels =>
         _selectedSort is CollectionSortOption.TitleAsc or CollectionSortOption.TitleDesc
             ? BrowseAlphabetJump.Labels
@@ -516,25 +527,65 @@ public partial class CollectionDetailPage
         return string.Format(L["RelativeDays"], (int)diff.TotalDays);
     }
 
+    private void OnItemWatchStateChanged(MediaCardViewModel vm)
+    {
+        if (!Guid.TryParse(vm.Id, out var mediaId))
+            return;
+
+        var state = new UserMediaStateDto
+        {
+            IsCompleted = vm.Watched,
+            ProgressPercentage = vm.Progress
+        };
+
+        _browseRows = _browseRows
+            .Select(row => row.Media.Id == mediaId
+                ? row with { Media = row.Media with { UserState = state } }
+                : row)
+            .ToList();
+        RebuildDisplayRows();
+    }
+
+    private MediaCardViewModel? ToBrowseCard(LiteMediaDto media) =>
+        media.ToCardViewModel(
+            ApiClient,
+            n => string.Format(S["SeasonNumber"], n),
+            episodeStillOnly: EpisodeStills);
+
     private static string GetItemHref(MediaCardViewModel item) => item.Kind switch
     {
         MediaCardKind.Serie => $"/series/{item.Id}",
+        MediaCardKind.Season when item.ParentId is not null && item.SeasonNumber is not null =>
+            $"/series/{item.ParentId}/seasons/{item.SeasonNumber}",
+        MediaCardKind.Episode when item.ParentId is not null && item.SeasonNumber is not null && item.EpisodeNumber is not null =>
+            $"/series/{item.ParentId}/seasons/{item.SeasonNumber}/episodes/{item.EpisodeNumber}",
+        MediaCardKind.Cover when item.MediaType == MediaType.MusicArtist => $"/music/artists/{item.Id}",
+        MediaCardKind.Cover when item.MediaType == MediaType.MusicTrack && item.ParentId is not null =>
+            $"/music/albums/{item.ParentId}#track-{item.Id}",
         MediaCardKind.Cover => $"/music/albums/{item.Id}",
         _ => $"/movies/{item.Id}"
     };
 
     private static string GetLiteItemHref(LiteMediaDto item) => item switch
     {
+        LiteMusicArtistDto artist => $"/music/artists/{artist.Id}",
         LiteMusicAlbumDto album => $"/music/albums/{album.Id}",
+        LiteMusicTrackDto track => $"/music/albums/{track.AlbumId}#track-{track.Id}",
         LiteSerieDto serie => $"/series/{serie.Id}",
+        LiteSerieSeasonDto season => $"/series/{season.SerieId}/seasons/{season.SeasonNumber}",
+        LiteSerieEpisodeDto episode => $"/series/{episode.SerieId}/seasons/{episode.SeasonNumber}/episodes/{episode.EpisodeNumber}",
         _ => $"/movies/{item.Id}"
     };
 
     private void NavigateToItem(LiteMediaDto item) =>
         NavigationManager.NavigateTo(GetLiteItemHref(item));
 
-    private static MediaCardVariant GetVariant(MediaCardViewModel item) =>
-        item.Kind == MediaCardKind.Cover ? MediaCardVariant.Cover : MediaCardVariant.Poster;
+    private static MediaCardVariant GetVariant(MediaCardViewModel item) => item.Kind switch
+    {
+        MediaCardKind.Cover => MediaCardVariant.Cover,
+        MediaCardKind.Episode => MediaCardVariant.Backdrop,
+        _ => MediaCardVariant.Poster
+    };
 
     private IReadOnlyList<string> GetItemPreviewUrls(LiteMediaDto item)
     {

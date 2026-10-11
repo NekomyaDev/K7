@@ -121,6 +121,7 @@ public static class PlaylistMappings
                 IndexedFileId = indexedFile?.Id,
                 Duration = (indexedFile?.FileMetadata as AudioFileMetadata)?.Duration.TotalSeconds,
                 UserRating = media?.Ratings.OfType<UserRating>().FirstOrDefault()?.Value is double v ? (int)v : null,
+                UserState = media?.UserMediaStates.FirstOrDefault()?.ToUserMediaStateDto(),
                 Pictures = pictures.Select(p => p.ToMetadataPictureDto()).ToList()
             };
         }

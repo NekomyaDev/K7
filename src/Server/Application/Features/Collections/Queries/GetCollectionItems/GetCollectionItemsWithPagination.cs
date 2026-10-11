@@ -42,6 +42,10 @@ public class GetCollectionItemsWithPaginationQueryHandler(IApplicationDbContext 
             .Include(i => i.Media)
                 .ThenInclude(m => m.Ratings)
             .Include(i => (i.Media as MusicAlbum)!.Tracks)
+            .Include(i => (i.Media as SerieEpisode)!.Season)
+            .Include(i => (i.Media as SerieSeason)!.Serie)
+                .ThenInclude(s => s!.Pictures)
+                    .ThenInclude(p => p.Variants)
             .Where(i => i.CollectionId == request.CollectionId)
             .OrderBy(i => i.Order)
             .AsSplitQuery()
@@ -59,16 +63,19 @@ public class GetCollectionItemsWithPaginationQueryHandler(IApplicationDbContext 
 
             query = query.Where(i => !excludedMediaIds.Contains(i.MediaId));
 
+            // Series, seasons, albums and artists have no files of their own.
+            // Availability is the episode or track linkage, same table the library browse uses.
             if (request.IncludeUnavailable)
             {
                 query = query.Where(i =>
-                    !i.Media.IndexedFiles.Any()
-                    || i.Media.IndexedFiles.Any(f => !excludedLibraryIds.Contains(f.LibraryId)));
+                    !context.MediaLibraryAvailabilities.Any(a => a.MediaId == i.MediaId)
+                    || context.MediaLibraryAvailabilities.Any(a =>
+                        a.MediaId == i.MediaId && !excludedLibraryIds.Contains(a.LibraryId)));
             }
             else
             {
-                query = query.Where(i =>
-                    i.Media.IndexedFiles.Any(f => !excludedLibraryIds.Contains(f.LibraryId)));
+                query = query.Where(i => context.MediaLibraryAvailabilities.Any(a =>
+                    a.MediaId == i.MediaId && !excludedLibraryIds.Contains(a.LibraryId)));
             }
 
             var restrictionProfile = await context.ContentRestrictionProfiles
@@ -85,6 +92,16 @@ public class GetCollectionItemsWithPaginationQueryHandler(IApplicationDbContext 
             }
         }
 
-        return await query.PaginatedListAsync(request.PageNumber, request.PageSize);
+        var page = await query.PaginatedListAsync(request.PageNumber, request.PageSize);
+        if (userId is { } id)
+        {
+            await UserWatchStateAttacher.AttachAsync(
+                context,
+                page.Items.Select(item => item.Media),
+                id,
+                cancellationToken);
+        }
+
+        return page;
     }
 }

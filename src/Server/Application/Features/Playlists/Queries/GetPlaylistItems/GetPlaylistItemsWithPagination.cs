@@ -99,6 +99,13 @@ public class GetPlaylistItemsWithPaginationQueryHandler(IApplicationDbContext co
             }
         }
 
-        return await query.AsSplitQuery().PaginatedListAsync(request.PageNumber, request.PageSize);
+        var page = await query.AsSplitQuery().PaginatedListAsync(request.PageNumber, request.PageSize);
+        await UserWatchStateAttacher.AttachAsync(
+            context,
+            page.Items.Select(item => item.Media),
+            userId.Value,
+            cancellationToken);
+
+        return page;
     }
 }

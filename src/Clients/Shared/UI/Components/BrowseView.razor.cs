@@ -19,6 +19,7 @@ public partial class BrowseView<TItem> : IAsyncDisposable
     [Parameter] public Func<Task>? OnLoadMore { get; set; }
 
     [Parameter] public RenderFragment<TItem>? GridTemplate { get; set; }
+    [Parameter] public bool GridEnabled { get; set; } = true;
     [Parameter] public RenderFragment<TItem>? ListTemplate { get; set; }
     [Parameter] public RenderFragment? TableHeaderContent { get; set; }
     [Parameter] public RenderFragment? TableColgroupContent { get; set; }
@@ -312,7 +313,7 @@ public partial class BrowseView<TItem> : IAsyncDisposable
     private List<BrowseViewMode> BuildAvailableModes()
     {
         var modes = new List<BrowseViewMode>();
-        if (GridTemplate is not null) modes.Add(BrowseViewMode.Grid);
+        if (GridEnabled && GridTemplate is not null) modes.Add(BrowseViewMode.Grid);
         if (!_isMobileViewport
             && (TableContent is not null || (TableHeaderContent is not null && TableRowTemplate is not null)))
         {

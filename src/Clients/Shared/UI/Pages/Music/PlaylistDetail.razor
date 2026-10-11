@@ -154,15 +154,45 @@
 
                       Class="playlist-detail-browse"
 
+                      DefaultItemWidth="@GridItemWidth"
+
+                      DefaultSpacing="24"
+
+                      GridItemAspectRatio="@GridAspectRatio"
+
+                      GridCardVariant="@GridCardVariant"
+
                       ListItemHeight="64"
 
                       @ref="_browseView"
+
+                      GridEnabled="@ShowPosterGrid"
 
                       OnColumnPickerRequested="OnColumnPickerRequested">
 
             <EmptyContent>
                 <K7EmptyState Icon="@Phosphor.Queue" Title="@L["Empty"]" />
             </EmptyContent>
+
+            <GridTemplate Context="row">
+                @{
+                    var item = row.Item;
+                    var vm = GetCardViewModel(item);
+                }
+                @if (vm is not null)
+                {
+                    <MediaCard Model="vm"
+                               Variant="@GetCardVariant(vm)"
+                               Href="@GetItemHref(item)"
+                               FooterVisible="true"
+                               OverlayEnabled="true"
+                               ProgressEnabled="_canTrackProgress"
+                               WatchedStatusEnabled="_canTrackProgress"
+                               WatchStateMenuEnabled="_canSetWatchState"
+                               OnActivated="@GetActivationCallback(item)"
+                               OnWatchStateChanged="() => OnItemWatchStateChanged(vm)" />
+                }
+            </GridTemplate>
 
             <TableContent>
                 <K7DataTable TItem="PlaylistItemViewModel"
@@ -227,6 +257,7 @@
                                                          ProgressEnabled="_canTrackProgress"
                                                          WatchedStatusEnabled="_canTrackProgress"
                                                          WatchStateMenuEnabled="_canSetWatchState"
+                                                         OnWatchStateChanged="() => OnItemWatchStateChanged(vm)"
                                                          OnRemove="() => RemoveItem(item)" />
                             </div>
                         </CellTemplate>
@@ -325,6 +356,8 @@
                                                  WatchedStatusEnabled="_canTrackProgress"
 
                                                  WatchStateMenuEnabled="_canSetWatchState"
+
+                                                 OnWatchStateChanged="() => OnItemWatchStateChanged(vm)"
 
                                                  OnRemove="() => RemoveItem(item)" />
 

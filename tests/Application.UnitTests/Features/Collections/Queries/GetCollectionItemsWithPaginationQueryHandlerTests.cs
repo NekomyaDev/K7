@@ -1,4 +1,5 @@
 using K7.Server.Application.Common.Interfaces;
+using K7.Server.Application.Common.Models;
 using K7.Server.Application.Features.Collections.Queries.GetCollectionItems;
 using K7.Server.Domain.Entities;
 using K7.Server.Domain.Entities.Collections;
@@ -129,6 +130,205 @@ public class GetCollectionItemsWithPaginationQueryHandlerTests
             [_availableMediaId, _unavailableMediaId]);
     }
 
+    [Test]
+    public async Task Handle_ShouldAttachCurrentUserWatchState()
+    {
+        var otherUserId = Guid.NewGuid();
+        _context.Users.Add(new User { Id = otherUserId, DisplayName = "other" });
+        _context.UserMediaStates.AddRange(
+            new UserMediaState
+            {
+                UserId = _userId,
+                MediaId = _availableMediaId,
+                IsCompleted = true,
+                PlayCount = 2
+            },
+            new UserMediaState
+            {
+                UserId = otherUserId,
+                MediaId = _availableMediaId,
+                IsCompleted = false
+            });
+        await _context.SaveChangesAsync();
+
+        var result = await _handler.Handle(new GetCollectionItemsWithPaginationQuery
+        {
+            CollectionId = _collectionId,
+            PageNumber = 1,
+            PageSize = 50,
+            IncludeUnavailable = false
+        }, CancellationToken.None);
+
+        var state = result.Items.Should().ContainSingle().Which.Media.UserMediaStates.Should().ContainSingle().Subject;
+        state.UserId.Should().Be(_userId);
+        state.IsCompleted.Should().BeTrue();
+    }
+
+    [Test]
+    public async Task Handle_ShouldMarkSerieAndSeasonWatched_WhenAllEpisodesAreCompleted()
+    {
+        var (collectionId, serieId, seasonId) = SeedSerieCollection(episodesCompleted: 2, serieMarkedCompleted: false);
+
+        var result = await LoadCollectionAsync(collectionId);
+
+        Watched(result, serieId).Should().BeTrue();
+        Watched(result, seasonId).Should().BeTrue();
+    }
+
+    [Test]
+    public async Task Handle_ShouldNotMarkSerieWatched_WhenAnEpisodeRemains()
+    {
+        var (collectionId, serieId, _) = SeedSerieCollection(episodesCompleted: 1, serieMarkedCompleted: true);
+
+        var result = await LoadCollectionAsync(collectionId);
+
+        Watched(result, serieId).Should().BeFalse();
+    }
+
+    [Test]
+    public async Task Handle_ShouldIncludeSerieAndSeason_WhenLibraryAvailabilityExists()
+    {
+        var serieId = Guid.NewGuid();
+        var seasonId = Guid.NewGuid();
+        var missingSerieId = Guid.NewGuid();
+        var collectionId = Guid.NewGuid();
+
+        _context.Medias.AddRange(
+            new Serie { Id = serieId, Title = "Show", SortTitle = "Show" },
+            new SerieSeason
+            {
+                Id = seasonId,
+                SerieId = serieId,
+                SeasonNumber = 1,
+                Title = "S1",
+                SortTitle = "S1"
+            },
+            new Serie { Id = missingSerieId, Title = "Missing", SortTitle = "Missing" });
+        _context.MediaLibraryAvailabilities.AddRange(
+            new MediaLibraryAvailability { LibraryId = _libraryId, MediaId = serieId },
+            new MediaLibraryAvailability { LibraryId = _libraryId, MediaId = seasonId });
+        _context.Collections.Add(new Collection
+        {
+            Id = collectionId,
+            Title = "Shows",
+            UserId = _userId,
+            MediaType = MediaType.Serie
+        });
+        _context.CollectionItems.AddRange(
+            new CollectionItem { Id = Guid.NewGuid(), CollectionId = collectionId, MediaId = serieId, Order = 0 },
+            new CollectionItem { Id = Guid.NewGuid(), CollectionId = collectionId, MediaId = seasonId, Order = 1 },
+            new CollectionItem { Id = Guid.NewGuid(), CollectionId = collectionId, MediaId = missingSerieId, Order = 2 });
+        await _context.SaveChangesAsync();
+
+        var result = await _handler.Handle(new GetCollectionItemsWithPaginationQuery
+        {
+            CollectionId = collectionId,
+            PageNumber = 1,
+            PageSize = 50,
+            IncludeUnavailable = false
+        }, CancellationToken.None);
+
+        result.Items.Select(i => i.MediaId).Should().BeEquivalentTo([serieId, seasonId]);
+    }
+
+    private (Guid CollectionId, Guid SerieId, Guid SeasonId) SeedSerieCollection(
+        int episodesCompleted,
+        bool serieMarkedCompleted)
+    {
+        var serieId = Guid.NewGuid();
+        var seasonId = Guid.NewGuid();
+        var collectionId = Guid.NewGuid();
+        var serie = new Serie { Id = serieId, Title = "Show", SortTitle = "Show" };
+        var season = new SerieSeason
+        {
+            Id = seasonId,
+            SerieId = serieId,
+            Serie = serie,
+            SeasonNumber = 1,
+            Title = "S1",
+            SortTitle = "S1"
+        };
+        serie.Seasons.Add(season);
+
+        var episodes = new List<SerieEpisode>();
+        for (var number = 1; number <= 2; number++)
+        {
+            var episode = new SerieEpisode
+            {
+                Id = Guid.NewGuid(),
+                SerieId = serieId,
+                Serie = serie,
+                SeasonId = seasonId,
+                Season = season,
+                EpisodeNumber = number,
+                Title = $"E{number}",
+                SortTitle = $"E{number}"
+            };
+            season.Episodes.Add(episode);
+            episodes.Add(episode);
+        }
+
+        _context.Medias.AddRange(serie, season);
+        _context.Medias.AddRange(episodes);
+        _context.Collections.Add(new Collection
+        {
+            Id = collectionId,
+            Title = "Shows",
+            UserId = _userId,
+            MediaType = MediaType.Serie
+        });
+        _context.CollectionItems.AddRange(
+            new CollectionItem
+            {
+                Id = Guid.NewGuid(),
+                CollectionId = collectionId,
+                MediaId = serieId,
+                Order = 0
+            },
+            new CollectionItem
+            {
+                Id = Guid.NewGuid(),
+                CollectionId = collectionId,
+                MediaId = seasonId,
+                Order = 1
+            });
+
+        if (serieMarkedCompleted)
+        {
+            _context.UserMediaStates.Add(new UserMediaState
+            {
+                UserId = _userId,
+                MediaId = serieId,
+                IsCompleted = true
+            });
+        }
+
+        foreach (var episode in episodes.Take(episodesCompleted))
+        {
+            _context.UserMediaStates.Add(new UserMediaState
+            {
+                UserId = _userId,
+                MediaId = episode.Id,
+                IsCompleted = true
+            });
+        }
+
+        _context.SaveChanges();
+        return (collectionId, serieId, seasonId);
+    }
+
+    private Task<PaginatedList<CollectionItem>> LoadCollectionAsync(Guid collectionId) =>
+        _handler.Handle(new GetCollectionItemsWithPaginationQuery
+        {
+            CollectionId = collectionId,
+            PageNumber = 1,
+            PageSize = 50,
+            IncludeUnavailable = true
+        }, CancellationToken.None);
+
+    private static bool Watched(PaginatedList<CollectionItem> result, Guid mediaId) =>
+        result.Items.Single(item => item.MediaId == mediaId).Media.UserMediaStates.Single().IsCompleted;
+
     private Movie SeedMovie(string title, bool withFile)
     {
         var movie = new Movie
@@ -148,6 +348,11 @@ public class GetCollectionItemsWithPaginationQueryHandlerTests
                 Path = $"/media/{title}.mkv",
                 Hash = 1,
                 Size = 1
+            });
+            _context.MediaLibraryAvailabilities.Add(new MediaLibraryAvailability
+            {
+                LibraryId = _libraryId,
+                MediaId = movie.Id
             });
         }
 

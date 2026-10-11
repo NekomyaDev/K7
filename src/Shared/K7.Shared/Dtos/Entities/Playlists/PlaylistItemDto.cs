@@ -1,3 +1,5 @@
+using K7.Shared.Dtos.Entities;
+
 namespace K7.Shared.Dtos.Entities.Playlists;
 
 public sealed record PlaylistItemDto
@@ -13,6 +15,7 @@ public sealed record PlaylistItemDto
     public Guid? IndexedFileId { get; init; }
     public double? Duration { get; init; }
     public int? UserRating { get; init; }
+    public UserMediaStateDto? UserState { get; init; }
     public IReadOnlyList<MetadataPictureDto>? Pictures { get; init; }
 
 }

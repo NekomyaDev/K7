@@ -61,7 +61,7 @@
         <div class="browse-view-surfaces">
             @* Keep grid/list/table mounted. Remounting Virtualize on mode change
                leaves ItemsProvider stuck (height 0 / cancelled first fetch). *@
-            @if (GridTemplate is not null && GridItemAspectRatio is not null)
+            @if (GridEnabled && GridTemplate is not null && GridItemAspectRatio is not null)
             {
                 <div class="browse-view-surface @(IsMode(BrowseViewMode.Grid) ? "is-active" : "is-inactive")"
                      aria-hidden="@(!IsMode(BrowseViewMode.Grid))"
@@ -104,7 +104,7 @@
                     }
                 </div>
             }
-            else if (GridTemplate is not null && GridItemAspectRatio is null && IsMode(BrowseViewMode.Grid))
+            else if (GridEnabled && GridTemplate is not null && GridItemAspectRatio is null && IsMode(BrowseViewMode.Grid))
             {
                 <div class="browse-view-surface is-active">
                     <div class="browse-view-simple-grid @(SingleColumnOnMobile ? "browse-view-simple-grid--single-col-mobile" : null)"
