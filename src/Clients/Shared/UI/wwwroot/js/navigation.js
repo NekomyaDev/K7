@@ -3897,11 +3897,42 @@ K7.setSafeArea = function (top, bottom, left, right) {
     s.setProperty('--k7-safe-right', right + 'px');
 };
 
+// Same cutoff as the CSS bottom sheet (@media max-width: 599.98px).
+// window.innerWidth includes the scrollbar, so a desktop window shrunk into
+// the mobile layout can still report >= 600 and skip the sheet path.
+K7.isNarrowViewport = function () {
+    return window.matchMedia('(max-width: 599.98px)').matches;
+};
+
+K7._resetMenuInlineLayout = function (dropdown) {
+    if (!dropdown || !dropdown.style) return;
+    var s = dropdown.style;
+    s.position = '';
+    s.top = '';
+    s.bottom = '';
+    s.left = '';
+    s.right = '';
+    s.width = '';
+    s.minWidth = '';
+    s.maxWidth = '';
+    s.maxHeight = '';
+    s.transform = '';
+    s.overflowY = '';
+    s.zIndex = '';
+    s.opacity = '';
+    s.visibility = '';
+    s.display = '';
+};
+
 K7.positionDropdown = function (root, dropdown) {
     if (!root || !dropdown) return;
 
-    // On mobile, CSS bottom sheet handles positioning
-    if (window.innerWidth < 600) return;
+    // On mobile, CSS bottom sheet handles positioning.
+    // Drop leftover desktop inline top/left or the sheet collapses against CSS bottom.
+    if (K7.isNarrowViewport()) {
+        K7._resetMenuInlineLayout(dropdown);
+        return;
+    }
 
     var isSubmenu = !!root.closest('.k7-menu-dropdown');
     var positionAnchor = K7._menuPositionAnchor;
@@ -4309,6 +4340,11 @@ K7._positionBelowAnchor = function (dropdown, anchorRect, ddRect, cbOffset, vw, 
 
 K7.revealDropdown = function (dropdown) {
     if (!dropdown || !dropdown.classList) return;
+    if (K7.isNarrowViewport()) {
+        K7._resetMenuInlineLayout(dropdown);
+        if (dropdown.parentElement === document.body)
+            dropdown.classList.add('k7-menu-dropdown--teleported');
+    }
     dropdown.classList.add('k7-menu-dropdown--placed');
 };
 
@@ -4320,7 +4356,8 @@ K7.positionDropdownDeferred = function (root, dropdown) {
     };
 
     // Mobile bottom sheet is CSS-positioned. Reveal on the same turn.
-    if (window.innerWidth < 600) {
+    if (K7.isNarrowViewport()) {
+        K7._resetMenuInlineLayout(dropdown);
         reveal();
         return;
     }
@@ -4425,7 +4462,7 @@ K7._releaseMobileOverlayLock = function (owner) {
 };
 
 K7._acquireMobileOverlayLock = function (owner) {
-    if (window.innerWidth >= 600 || !owner || owner._k7MobileLockAcquired) return;
+    if (!K7.isNarrowViewport() || !owner || owner._k7MobileLockAcquired) return;
     K7.acquireBackgroundInteractionLock();
     owner._k7MobileLockAcquired = true;
 };
@@ -4468,7 +4505,7 @@ K7._needsMenuPortal = function (root) {
     if (root.closest('.k7-dialog-backdrop')) {
         return false;
     }
-    if (window.innerWidth < 600) {
+    if (K7.isNarrowViewport()) {
         return true;
     }
     return K7._hasFixedContainingBlockAncestor(root);
@@ -4495,7 +4532,7 @@ K7.attachMobileMenu = function (root, dropdown, backdrop) {
 
     K7._teleportMenuElement(dropdown, root);
     if (backdrop) K7._teleportMenuElement(backdrop, root);
-    if (window.innerWidth < 600) {
+    if (K7.isNarrowViewport()) {
         dropdown.classList.add('k7-menu-dropdown--teleported');
         K7._acquireMobileOverlayLock(root);
     } else {
@@ -4594,7 +4631,8 @@ K7.positionSelectDropdown = function (button, dropdown) {
     };
 
     // On mobile, CSS bottom sheet handles positioning after teleport.
-    if (window.innerWidth < 600) {
+    if (K7.isNarrowViewport()) {
+        K7._resetMenuInlineLayout(dropdown);
         reveal();
         return;
     }

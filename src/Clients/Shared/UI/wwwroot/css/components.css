@@ -1196,12 +1196,14 @@ hr.k7-menu-divider { border: none; border-top: 1px solid var(--color-border); ma
     transform: translateY(100%);
     transition: opacity 0.25s ease, transform 0.3s cubic-bezier(0.32, 0.72, 0, 1), visibility 0.25s ease;
   }
+  .k7-menu-dropdown.k7-menu-dropdown--open,
   .k7-menu-dropdown--teleported.k7-menu-dropdown--open,
   .k7-menu-portal.k7-menu-dropdown.k7-menu-dropdown--open,
   .k7-menu--open > .k7-menu-dropdown {
     opacity: 1;
     visibility: visible;
     transform: translateY(0);
+    z-index: calc(var(--z-dropdown, 1000) + 2);
   }
 
   /* Grow bottom sheet only as much as needed when search hints are open */
