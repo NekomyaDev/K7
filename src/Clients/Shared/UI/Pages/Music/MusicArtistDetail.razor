@@ -69,6 +69,20 @@ else if (_artist is not null)
                         <h2 class="artist-name">@_artist.Title</h2>
                     </div>
 
+                    @if (!string.IsNullOrWhiteSpace(_artist.Country) || _artist.ReleaseDate is not null)
+                    {
+                        <div class="artist-facts">
+                            @if (!string.IsNullOrWhiteSpace(_artist.Country))
+                            {
+                                <K7Chip Variant="outlined" Size="sm" Icon="@Phosphor.Globe" Text="@_artist.Country" />
+                            }
+                            @if (_artist.ReleaseDate is DateOnly formedOn)
+                            {
+                                <K7Chip Variant="outlined" Size="sm" Icon="@Phosphor.Calendar" Text="@FormatFormationDate(formedOn)" />
+                            }
+                        </div>
+                    }
+
                     @if (!string.IsNullOrEmpty(_artist.Biography))
                     {
                         <div class="artist-bio overview-clickable focusable" tabindex="0" role="button" @onclick="OpenBiographyDialogAsync">

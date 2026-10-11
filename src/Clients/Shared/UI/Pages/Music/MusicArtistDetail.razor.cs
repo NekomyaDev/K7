@@ -377,6 +377,9 @@ public partial class MusicArtistDetail : IDisposable
             .ToList();
     }
 
+    private static string FormatFormationDate(DateOnly date) =>
+        date is { Month: 1, Day: 1 } ? date.Year.ToString() : date.ToString("d");
+
     private static string FormatTime(double seconds)
     {
         if (seconds <= 0) return "";

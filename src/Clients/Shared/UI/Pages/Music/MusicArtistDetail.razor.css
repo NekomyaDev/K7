@@ -70,6 +70,13 @@
     width: 100%;
 }
 
+.artist-facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin-top: var(--space-2);
+}
+
 .artist-actions {
     display: flex;
     flex-wrap: wrap;
@@ -182,6 +189,10 @@
 
     .artist-title-row {
         align-items: center;
+        justify-content: center;
+    }
+
+    .artist-facts {
         justify-content: center;
     }
 
