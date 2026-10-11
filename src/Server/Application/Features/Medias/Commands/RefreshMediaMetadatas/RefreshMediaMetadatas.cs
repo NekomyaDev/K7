@@ -376,6 +376,9 @@ public class RefreshMediaMetadatasCommandHandler : IRequestHandler<RefreshMediaM
                 if (!artist.IsFieldLocked(nameof(MusicArtist.Country)) && !string.IsNullOrEmpty(mbDetails.Country))
                     artist.Country = mbDetails.Country;
 
+                if (!artist.IsFieldLocked(nameof(MusicArtist.ReleaseDate)) && mbDetails.FormedOn is DateOnly formedOn)
+                    artist.ReleaseDate = formedOn;
+
                 if (!artist.IsFieldLocked(nameof(MusicArtist.ExternalIds)))
                 {
                     if (!string.IsNullOrEmpty(mbDetails.MusicBrainzArtistId)
@@ -892,6 +895,11 @@ public class RefreshMediaMetadatasCommandHandler : IRequestHandler<RefreshMediaM
 
                 if (!artist.IsFieldLocked(nameof(MusicArtist.Country)) && !string.IsNullOrEmpty(mbDetails.Country) && string.IsNullOrEmpty(artist.Country))
                     artist.Country = mbDetails.Country;
+
+                if (!artist.IsFieldLocked(nameof(MusicArtist.ReleaseDate))
+                    && artist.ReleaseDate is null
+                    && mbDetails.FormedOn is DateOnly formedOn)
+                    artist.ReleaseDate = formedOn;
 
                 ApplyMusicArtistLocalizedNames(artist, mbDetails.Name, mbDetails.OriginalName, mbDetails.SortName);
 

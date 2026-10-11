@@ -757,6 +757,7 @@ public class MusicBrainzMetadataProvider : IMetadataProvider<ExternalMusicAlbumM
                 OriginalName = localized.OriginalName,
                 SortName = localized.SortName ?? artist.SortName,
                 Country = country,
+                FormedOn = ParseDate(artist.LifeSpan?.Begin),
                 MusicBrainzArtistId = providerId,
                 WikidataId = wikidataId,
                 SpotifyId = spotifyId,
@@ -1143,6 +1144,7 @@ public class MusicBrainzMetadataProvider : IMetadataProvider<ExternalMusicAlbumM
         public string? SortName { get; init; }
         public string? Type { get; init; }
         public MbArea? Area { get; init; }
+        public MbLifeSpan? LifeSpan { get; init; }
         public List<MbRelation>? Relations { get; init; }
         public List<MbAlias>? Aliases { get; init; }
     }
@@ -1175,6 +1177,11 @@ public class MusicBrainzMetadataProvider : IMetadataProvider<ExternalMusicAlbumM
     private record MbArea
     {
         public string? Name { get; init; }
+    }
+
+    private record MbLifeSpan
+    {
+        public string? Begin { get; init; }
     }
 
     private record MbRelation

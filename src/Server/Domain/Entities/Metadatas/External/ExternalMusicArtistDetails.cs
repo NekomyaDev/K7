@@ -8,6 +8,7 @@ public class ExternalMusicArtistDetails
     public string? Biography { get; init; }
     public string? ImageUrl { get; init; }
     public string? Country { get; init; }
+    public DateOnly? FormedOn { get; init; }
     public string? MusicBrainzArtistId { get; init; }
     public string? WikidataId { get; init; }
     public string? SpotifyId { get; init; }

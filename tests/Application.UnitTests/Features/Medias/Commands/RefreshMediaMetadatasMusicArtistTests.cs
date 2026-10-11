@@ -82,7 +82,8 @@ public class RefreshMediaMetadatasMusicArtistTests
             .Returns(new ExternalMusicArtistDetails
             {
                 MusicBrainzArtistId = "jt-mbid",
-                Country = "US"
+                Country = "US",
+                FormedOn = new DateOnly(1981, 1, 31)
             });
 
         await _handler.Handle(new RefreshMediaMetadatasCommand
@@ -99,6 +100,7 @@ public class RefreshMediaMetadatasMusicArtistTests
             .SingleAsync(a => a.Id == artist.Id);
 
         updated.Country.Should().Be("US");
+        updated.ReleaseDate.Should().Be(new DateOnly(1981, 1, 31));
         updated.ExternalIds.Should().ContainSingle(e =>
             e.ProviderName == "musicbrainz" && e.Value == "jt-mbid");
         await _artistProvider.Received(1).SearchByNameAsync(
@@ -167,5 +169,87 @@ public class RefreshMediaMetadatasMusicArtistTests
         updatedArtist.ExternalIds.Should().ContainSingle(e =>
             e.ProviderName == "musicbrainz" && e.Value == "nsync-mbid");
         updatedArtist.ExternalIds.Should().NotContain(e => e.Value == "wrong-mbid");
+    }
+
+    [Test]
+    public async Task Handle_ShouldKeepLockedFormationDate_WhenMusicBrainzReturnsAnotherDate()
+    {
+        var artist = new MusicArtist
+        {
+            Title = "Justin Timberlake",
+            ReleaseDate = new DateOnly(1990, 1, 1),
+            LockedFields = ["ReleaseDate"]
+        };
+        _context.Medias.Add(artist);
+        await _context.SaveChangesAsync();
+
+        _artistProvider.SearchByNameAsync("Justin Timberlake", "en", Arg.Any<CancellationToken>())
+            .Returns(new ExternalMusicArtistDetails
+            {
+                MusicBrainzArtistId = "jt-mbid",
+                FormedOn = new DateOnly(1981, 1, 31)
+            });
+
+        await _handler.Handle(new RefreshMediaMetadatasCommand
+        {
+            MediaId = artist.Id,
+            MetadataProviderExternalId = "",
+            MetadataProviderName = "musicbrainz",
+            Language = "en",
+            FallbackLanguage = "en"
+        }, CancellationToken.None);
+
+        var updated = await _context.Medias.OfType<MusicArtist>().SingleAsync(a => a.Id == artist.Id);
+        updated.ReleaseDate.Should().Be(new DateOnly(1990, 1, 1));
+    }
+
+    [Test]
+    public async Task Handle_ShouldSetFormationDate_WhenRefreshingAlbumArtist()
+    {
+        var artist = new MusicArtist { Title = "*NSYNC" };
+        var album = new MusicAlbum
+        {
+            Title = "No Strings Attached",
+            ArtistId = artist.Id,
+            Artist = artist
+        };
+        _context.Medias.Add(artist);
+        _context.Medias.Add(album);
+        await _context.SaveChangesAsync();
+        album.ArtistId = artist.Id;
+        await _context.SaveChangesAsync();
+
+        _albumProvider.FetchMetadata("rg-nsa", "en", Arg.Any<CancellationToken>())
+            .Returns(new ExternalMusicAlbumMetadata
+            {
+                Title = "No Strings Attached",
+                Artists =
+                [
+                    new ExternalMusicArtistMetadata
+                    {
+                        Name = "NSYNC",
+                        MusicBrainzArtistId = "nsync-mbid"
+                    }
+                ]
+            });
+
+        _artistProvider.FetchByProviderIdAsync("nsync-mbid", "en", Arg.Any<CancellationToken>())
+            .Returns(new ExternalMusicArtistDetails
+            {
+                MusicBrainzArtistId = "nsync-mbid",
+                FormedOn = new DateOnly(1995, 1, 1)
+            });
+
+        await _handler.Handle(new RefreshMediaMetadatasCommand
+        {
+            MediaId = album.Id,
+            MetadataProviderExternalId = "rg-nsa",
+            MetadataProviderName = "musicbrainz",
+            Language = "en",
+            FallbackLanguage = "en"
+        }, CancellationToken.None);
+
+        var updated = await _context.Medias.OfType<MusicArtist>().SingleAsync(a => a.Id == artist.Id);
+        updated.ReleaseDate.Should().Be(new DateOnly(1995, 1, 1));
     }
 }
