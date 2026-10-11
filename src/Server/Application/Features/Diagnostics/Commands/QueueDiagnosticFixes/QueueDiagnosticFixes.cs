@@ -3,6 +3,7 @@ using K7.Server.Application.Common.Exceptions;
 using K7.Server.Application.Common.Security;
 using K7.Server.Application.Features.BackgroundTasks.Commands.CreateBackgroundTasksBatch;
 using K7.Server.Application.Features.Diagnostics.Commands.FixDiagnosticItems;
+using K7.Server.Application.Features.Diagnostics.Commands.MergeDuplicateExternalIds;
 using K7.Server.Application.Features.Diagnostics.Services;
 using K7.Server.Domain.Constants;
 using K7.Server.Domain.Enums;
@@ -35,6 +36,19 @@ public class QueueDiagnosticFixesCommandHandler(
             [
                 new ValidationFailure(nameof(request.Issue), $"Issue {request.Issue} does not support automated fixes.")
             ]);
+
+        if (action == DiagnosticFixAction.MergeDuplicateExternalIds)
+        {
+            var merged = await sender.Send(
+                new MergeDuplicateExternalIdsCommand { LibraryId = request.LibraryId },
+                cancellationToken);
+
+            logger.LogInformation(
+                "Merged {MergedCount} duplicate medias for issue {Issue} (library: {LibraryId})",
+                merged, request.Issue, request.LibraryId);
+
+            return merged;
+        }
 
         var entityIds = await entityResolver.ResolveEntityIdsAsync(request.Issue, request.LibraryId, cancellationToken);
         if (entityIds.Count == 0)

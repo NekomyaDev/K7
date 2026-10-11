@@ -99,6 +99,9 @@ public class FixDiagnosticItemsCommandHandler(
                         await QueueDetectMediaSegmentsForEpisodeAsync(entityId, cancellationToken);
                         break;
 
+                    case DiagnosticFixAction.MergeDuplicateExternalIds:
+                        throw new InvalidOperationException("Duplicate external id merge is not applied per entity.");
+
                     case DiagnosticFixAction.AnalyzeMusicTrackAudio:
                         await sender.Send(new CreateBackgroundTaskCommand
                         {

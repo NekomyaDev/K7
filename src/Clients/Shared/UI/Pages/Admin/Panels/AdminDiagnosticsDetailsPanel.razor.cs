@@ -619,7 +619,10 @@ public partial class AdminDiagnosticsDetailsPanel : IDisposable
         try
         {
             var result = await DiagnosticsService.QueueDiagnosticFixesAsync(issue, _filterLibraryId);
-            Snackbar.Add(string.Format(L["AllFixesQueued"], result), K7Severity.Success);
+            var queuedKey = action == DiagnosticFixAction.MergeDuplicateExternalIds
+                ? "DuplicatesMerged"
+                : "AllFixesQueued";
+            Snackbar.Add(string.Format(L[queuedKey], result), K7Severity.Success);
             await LoadAsync();
         }
         catch (Exception ex)
@@ -640,10 +643,13 @@ public partial class AdminDiagnosticsDetailsPanel : IDisposable
             ? _summaries.FirstOrDefault(l => l.LibraryId == _filterLibraryId.Value)?.LibraryTitle ?? L["FilterLibrary"]
             : L["AllLibraries"];
 
+        var messageKey = action == DiagnosticFixAction.MergeDuplicateExternalIds
+            ? "ConfirmBulkFixMessage_MergeDuplicates"
+            : "ConfirmBulkFixMessage";
         var confirmed = await DialogService.ShowMessageBoxAsync(
             L["ConfirmBulkFixTitle"],
             string.Format(
-                L["ConfirmBulkFixMessage"],
+                L[messageKey],
                 count,
                 issueLabel,
                 actionLabel,
@@ -693,6 +699,7 @@ public partial class AdminDiagnosticsDetailsPanel : IDisposable
         DiagnosticIssue.MissingThemeSong => DiagnosticFixAction.ExtractSerieThemeSong,
         DiagnosticIssue.MissingIntroOutro => DiagnosticFixAction.DetectMediaSegments,
         DiagnosticIssue.OrphanFile => DiagnosticFixAction.RetryCreateMedia,
+        DiagnosticIssue.DuplicateExternalId => DiagnosticFixAction.MergeDuplicateExternalIds,
         _ => null
     };
 
@@ -707,6 +714,7 @@ public partial class AdminDiagnosticsDetailsPanel : IDisposable
         DiagnosticFixAction.ExtractSerieThemeSong => L["ActionExtractThemeSong"],
         DiagnosticFixAction.DetectMediaSegments => L["ActionDetectIntroOutro"],
         DiagnosticFixAction.RetryCreateMedia => L["ActionRetryCreateMedia"],
+        DiagnosticFixAction.MergeDuplicateExternalIds => L["ActionMergeDuplicates"],
         _ => action.ToString()
     };
 
@@ -721,6 +729,7 @@ public partial class AdminDiagnosticsDetailsPanel : IDisposable
         DiagnosticFixAction.ExtractSerieThemeSong => Phosphor.MusicNotes,
         DiagnosticFixAction.DetectMediaSegments => Phosphor.Waveform,
         DiagnosticFixAction.RetryCreateMedia => Phosphor.ArrowClockwise,
+        DiagnosticFixAction.MergeDuplicateExternalIds => Phosphor.ArrowsIn,
         _ => Phosphor.Wrench
     };
 

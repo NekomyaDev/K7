@@ -97,14 +97,19 @@
   <data name="ActionHls" xml:space="preserve"><value>HLS</value></data>
   <data name="ActionAnalyzeAudio" xml:space="preserve"><value>Analyser</value></data>
   <data name="ActionRetryCreateMedia" xml:space="preserve"><value>Relancer la création</value></data>
+  <data name="ActionMergeDuplicates" xml:space="preserve"><value>Fusionner</value></data>
   <data name="ReIdentifyIndexedFileDialogTitle" xml:space="preserve"><value>Ré-identifier le fichier</value></data>
   <data name="ReIdentifyIndexedFileSent" xml:space="preserve"><value>Ré-identification lancée.</value></data>
   <data name="QueueAllFixes" xml:space="preserve"><value>Tout corriger ({0})</value></data>
   <data name="FixAll" xml:space="preserve"><value>Tout corriger</value></data>
   <data name="AllFixesQueued" xml:space="preserve"><value>{0} correction(s) lancée(s) en tâche de fond.</value></data>
+  <data name="DuplicatesMerged" xml:space="preserve"><value>{0} doublon(s) fusionné(s).</value></data>
   <data name="AllLibraries" xml:space="preserve"><value>Toutes les bibliothèques</value></data>
   <data name="ConfirmBulkFixTitle" xml:space="preserve"><value>Lancer les corrections en masse ?</value></data>
   <data name="ConfirmBulkFixMessage" xml:space="preserve"><value>{0} élément(s) seront traités pour "{1}" ({2}) dans {3}. Des tâches de fond seront créées et peuvent solliciter fortement le serveur pendant un moment.
+
+{4}</value></data>
+  <data name="ConfirmBulkFixMessage_MergeDuplicates" xml:space="preserve"><value>{0} élément(s) seront fusionnés pour "{1}" ({2}) dans {3}.
 
 {4}</value></data>
   <data name="ConfirmBulkFixConfirm" xml:space="preserve"><value>Lancer</value></data>
@@ -134,6 +139,8 @@ Résultat attendu : un fichier thème peut être produit si un audio d'intro uti
 Résultat attendu : des segments Intro/Outro apparaissent si le détecteur trouve une correspondance fiable. Saisons courtes ou similarité faible peuvent ne rien trouver.</value></data>
   <data name="ConfirmBulkFixDetail_MissingAudioAnalysis" xml:space="preserve"><value>Ce qui se passe : file l'analyse audio (AudioMuse) des pistes.
 Résultat attendu : l'analyse se termine pour les pistes traitables. En cas d'échec, l'analyse reste manquante.</value></data>
+  <data name="ConfirmBulkFixDetail_DuplicateExternalId" xml:space="preserve"><value>Ce qui se passe : fusionne les médias qui partagent un identifiant fournisseur. La fiche qui a le plus d'épisodes, de pistes ou de fichiers est gardée. Saisons, pistes, albums, fichiers et état utilisateur sont déplacés. Un même morceau sur deux albums n'est pas fusionné.
+Résultat attendu : le doublon disparaît quand la fiche vide peut être supprimée. S'il reste des données qui empêchent la suppression, la fiche source est conservée.</value></data>
   <data name="InaccessiblePath" xml:space="preserve"><value>Chemin inaccessible</value></data>
   <data name="FilterBy" xml:space="preserve"><value>Filtrer</value></data>
   <data name="FilterWorkClass" xml:space="preserve"><value>Classe de travail</value></data>

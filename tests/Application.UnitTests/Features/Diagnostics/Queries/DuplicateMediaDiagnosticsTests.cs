@@ -74,6 +74,55 @@ public class DuplicateMediaDiagnosticsTests
     }
 
     [Test]
+    public async Task Handle_ShouldNotReportDuplicateExternalId_WhenTracksShareRecordingAcrossAlbums()
+    {
+        var albumA = AddAlbum("Album A");
+        var albumB = AddAlbum("Album B");
+        var first = AddTrack("Song", albumA);
+        var second = AddTrack("Song", albumB);
+        AddExternalId(first, "isrc", "USRC17607839");
+        AddExternalId(second, "isrc", "USRC17607839");
+        AddExternalId(first, "musicbrainz", "recording-1");
+        AddExternalId(second, "musicbrainz", "recording-1");
+        await _context.SaveChangesAsync();
+
+        var items = await QueryItemsAsync(DiagnosticIssue.DuplicateExternalId);
+
+        items.Should().BeEmpty();
+    }
+
+    [Test]
+    public async Task Handle_ShouldReportDuplicateExternalId_WhenTracksShareRecordingOnTheSameAlbum()
+    {
+        var albumId = AddAlbum("Album");
+        var first = AddTrack("Song", albumId);
+        var second = AddTrack("Song (copy)", albumId);
+        AddExternalId(first, "isrc", "USRC17607839");
+        AddExternalId(second, "isrc", "USRC17607839");
+        await _context.SaveChangesAsync();
+
+        var items = await QueryItemsAsync(DiagnosticIssue.DuplicateExternalId);
+
+        items.Should().HaveCount(2);
+        items.Select(i => i.EntityId).Should().BeEquivalentTo([first, second]);
+    }
+
+    [Test]
+    public async Task Handle_ShouldReportDuplicateExternalId_WhenArtistsShareMusicBrainzId()
+    {
+        var first = AddArtist("Artist");
+        var second = AddArtist("Artist (copy)");
+        AddExternalId(first, "musicbrainz", "artist-1");
+        AddExternalId(second, "musicbrainz", "artist-1");
+        await _context.SaveChangesAsync();
+
+        var items = await QueryItemsAsync(DiagnosticIssue.DuplicateExternalId);
+
+        items.Should().HaveCount(2);
+        items.Select(i => i.EntityId).Should().BeEquivalentTo([first, second]);
+    }
+
+    [Test]
     public async Task Handle_ShouldNotReportDuplicateExternalId_WhenMediasBelongToDifferentPeers()
     {
         var peer = PeerServer.CreatePending("peer", "https://peer.example", "token");
@@ -417,6 +466,50 @@ public class DuplicateMediaDiagnosticsTests
         }
 
         return movie.Id;
+    }
+
+    private Guid AddAlbum(string title)
+    {
+        var album = new MusicAlbum
+        {
+            Id = Guid.NewGuid(),
+            Title = title
+        };
+        _context.Medias.Add(album);
+        return album.Id;
+    }
+
+    private Guid AddTrack(string title, Guid albumId)
+    {
+        var track = new MusicTrack
+        {
+            Id = Guid.NewGuid(),
+            Title = title,
+            AlbumId = albumId
+        };
+        _context.Medias.Add(track);
+        _context.MediaLibraryAvailabilities.Add(new MediaLibraryAvailability
+        {
+            LibraryId = _libraryId,
+            MediaId = track.Id
+        });
+        return track.Id;
+    }
+
+    private Guid AddArtist(string title)
+    {
+        var artist = new MusicArtist
+        {
+            Id = Guid.NewGuid(),
+            Title = title
+        };
+        _context.Medias.Add(artist);
+        _context.MediaLibraryAvailabilities.Add(new MediaLibraryAvailability
+        {
+            LibraryId = _libraryId,
+            MediaId = artist.Id
+        });
+        return artist.Id;
     }
 
     private void AddExternalId(Guid mediaId, string providerName, string value) =>

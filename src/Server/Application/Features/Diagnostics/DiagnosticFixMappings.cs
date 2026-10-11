@@ -16,6 +16,7 @@ public static class DiagnosticFixMappings
         DiagnosticIssue.MissingThemeSong => DiagnosticFixAction.ExtractSerieThemeSong,
         DiagnosticIssue.MissingIntroOutro => DiagnosticFixAction.DetectMediaSegments,
         DiagnosticIssue.OrphanFile => DiagnosticFixAction.RetryCreateMedia,
+        DiagnosticIssue.DuplicateExternalId => DiagnosticFixAction.MergeDuplicateExternalIds,
         _ => null
     };
 

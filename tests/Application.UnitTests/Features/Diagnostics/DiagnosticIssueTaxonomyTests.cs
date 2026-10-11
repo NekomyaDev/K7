@@ -1,3 +1,4 @@
+using K7.Server.Application.Features.Diagnostics;
 using K7.Server.Domain.Enums;
 using K7.Shared.Diagnostics;
 using K7.Shared.Dtos.Diagnostics;
@@ -58,6 +59,14 @@ public class DiagnosticIssueTaxonomyTests
             .Should().Be(DiagnosticSeverity.Info);
         DiagnosticIssueTaxonomy.GetSeverity(DiagnosticIssue.MissingMembers)
             .Should().Be(DiagnosticSeverity.Info);
+    }
+
+    [Test]
+    public void SupportsBulkFix_ShouldMapDuplicateExternalIdToMerge()
+    {
+        DiagnosticIssueTaxonomy.SupportsBulkFix(DiagnosticIssue.DuplicateExternalId).Should().BeTrue();
+        DiagnosticFixMappings.GetFixAction(DiagnosticIssue.DuplicateExternalId)
+            .Should().Be(DiagnosticFixAction.MergeDuplicateExternalIds);
     }
 }
 

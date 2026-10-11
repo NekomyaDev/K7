@@ -1,5 +1,6 @@
 using K7.Server.Application.Common.Interfaces;
 using K7.Server.Domain.Entities;
+using K7.Server.Domain.Entities.Medias;
 using K7.Server.Domain.Enums;
 
 namespace K7.Server.Application.Helpers;
@@ -12,13 +13,15 @@ namespace K7.Server.Application.Helpers;
 /// provider ids change over time and two distinct medias can legitimately share title + year.
 /// The per-identity lock (IMediaIdentityLock) strongly reduces the duplicate probability but
 /// cannot eliminate it, because two different identity keys can designate the same media.
-/// Detection is therefore the safety net: it flags suspicious medias without ever rejecting
-/// or merging anything (merging is a separate, deliberately postponed effort).
+/// Detection is therefore the safety net: it flags suspicious medias without rejecting them.
+/// Merging is an explicit diagnostic action, not part of detection.
 ///
 /// Two heuristics, both translated to SQL (Postgres and Sqlite) then grouped in process:
 /// - DuplicateExternalId: two medias share the same (ProviderName, Value) external id. This is
 ///   the most reliable signal. A local media and its federated copy can legitimately carry the
-///   same provider id, so only medias with the same PeerServerId are compared.
+///   same provider id, so only medias with the same PeerServerId are compared. The same
+///   recording on different albums (isrc or musicbrainz) is intentional and is not flagged.
+///   Two copies on the same album still are.
 /// - SuspectedDuplicateMedia: two top-level medias of the same type share a normalized title
 ///   (trim + case-insensitive) and release year within the same library. Scoped to Movie /
 ///   Serie / MusicAlbum so generic episode/track titles cannot form huge groups. Candidates
@@ -43,6 +46,12 @@ public static class DuplicateMediaDiagnosticHelper
         MediaType.MusicAlbum
     ];
 
+    public sealed record DuplicateExternalIdGroup(
+        string ProviderName,
+        string Value,
+        Guid? PeerServerId,
+        IReadOnlyList<Guid> MediaIds);
+
     public static async Task<HashSet<Guid>> GetDuplicateExternalIdMediaIdsAsync(
         IApplicationDbContext context,
         IReadOnlyCollection<Guid>? limitToMediaIds,
@@ -55,6 +64,11 @@ public static class DuplicateMediaDiagnosticHelper
 
         return ids;
     }
+
+    public static Task<IReadOnlyList<DuplicateExternalIdGroup>> GetDuplicateExternalIdGroupsAsync(
+        IApplicationDbContext context,
+        CancellationToken cancellationToken = default) =>
+        LoadDuplicateExternalIdGroupsAsync(context, cancellationToken);
 
     public static async Task<HashSet<Guid>> GetSuspectedDuplicateMediaIdsAsync(
         IApplicationDbContext context,
@@ -89,6 +103,14 @@ public static class DuplicateMediaDiagnosticHelper
         IApplicationDbContext context,
         CancellationToken cancellationToken)
     {
+        var groups = await LoadDuplicateExternalIdGroupsAsync(context, cancellationToken);
+        return groups.SelectMany(g => g.MediaIds).ToHashSet();
+    }
+
+    private static async Task<IReadOnlyList<DuplicateExternalIdGroup>> LoadDuplicateExternalIdGroupsAsync(
+        IApplicationDbContext context,
+        CancellationToken cancellationToken)
+    {
         // Slim projection + in-process grouping: a correlated EXISTS self-scan of ExternalIds
         // does not stay on the (ProviderName, Value) index once PeerServerId is pulled in.
         var rows = await context.ExternalIds
@@ -103,12 +125,58 @@ public static class DuplicateMediaDiagnosticHelper
             })
             .ToListAsync(cancellationToken);
 
-        return rows
+        var grouped = rows
             .GroupBy(r => (r.ProviderName, r.Value, r.PeerServerId))
-            .Where(g => g.Select(x => x.MediaId).Distinct().Count() > 1)
-            .SelectMany(g => g.Select(x => x.MediaId))
-            .ToHashSet();
+            .Select(g => (g.Key, MediaIds: g.Select(x => x.MediaId).Distinct().ToList()))
+            .Where(g => g.MediaIds.Count > 1)
+            .ToList();
+
+        if (grouped.Count == 0)
+            return [];
+
+        var candidateIds = grouped.SelectMany(g => g.MediaIds).Distinct().ToList();
+        var albumByTrack = await context.Medias
+            .OfType<MusicTrack>()
+            .AsNoTracking()
+            .Where(t => candidateIds.Contains(t.Id))
+            .Select(t => new { t.Id, t.AlbumId })
+            .ToDictionaryAsync(t => t.Id, t => t.AlbumId, cancellationToken);
+
+        var groups = new List<DuplicateExternalIdGroup>();
+        foreach (var (key, mediaIds) in grouped)
+        {
+            var kept = ExcludeWantedCrossAlbumRecordings(key.ProviderName, mediaIds, albumByTrack);
+            if (kept.Count <= 1)
+                continue;
+
+            groups.Add(new DuplicateExternalIdGroup(key.ProviderName, key.Value, key.PeerServerId, kept));
+        }
+
+        return groups;
     }
+
+    /// <summary>
+    /// A recording shared by tracks on different albums is an intentional copy.
+    /// Copies that share one album stay flagged. Artists that use musicbrainz stay flagged.
+    /// </summary>
+    private static List<Guid> ExcludeWantedCrossAlbumRecordings(
+        string providerName,
+        List<Guid> mediaIds,
+        Dictionary<Guid, Guid> albumByTrack)
+    {
+        if (!IsRecordingProvider(providerName) || !mediaIds.All(albumByTrack.ContainsKey))
+            return mediaIds;
+
+        var byAlbum = mediaIds.GroupBy(id => albumByTrack[id]).ToList();
+        if (byAlbum.Count <= 1)
+            return mediaIds;
+
+        return byAlbum.Where(g => g.Count() > 1).SelectMany(g => g).ToList();
+    }
+
+    private static bool IsRecordingProvider(string providerName) =>
+        providerName.Equals("isrc", StringComparison.OrdinalIgnoreCase)
+        || providerName.Equals("musicbrainz", StringComparison.OrdinalIgnoreCase);
 
     public static async Task<Dictionary<Guid, int>> GetSuspectedDuplicateCountsByLibraryAsync(
         IApplicationDbContext context,

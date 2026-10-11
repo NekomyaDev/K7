@@ -97,14 +97,19 @@
   <data name="ActionHls" xml:space="preserve"><value>HLS</value></data>
   <data name="ActionAnalyzeAudio" xml:space="preserve"><value>Analyze</value></data>
   <data name="ActionRetryCreateMedia" xml:space="preserve"><value>Retry creation</value></data>
+  <data name="ActionMergeDuplicates" xml:space="preserve"><value>Merge</value></data>
   <data name="ReIdentifyIndexedFileDialogTitle" xml:space="preserve"><value>Re-identify file</value></data>
   <data name="ReIdentifyIndexedFileSent" xml:space="preserve"><value>Re-identification started.</value></data>
   <data name="QueueAllFixes" xml:space="preserve"><value>Fix all ({0})</value></data>
   <data name="FixAll" xml:space="preserve"><value>Fix all</value></data>
   <data name="AllFixesQueued" xml:space="preserve"><value>{0} fix task(s) queued.</value></data>
+  <data name="DuplicatesMerged" xml:space="preserve"><value>{0} duplicate(s) merged.</value></data>
   <data name="AllLibraries" xml:space="preserve"><value>All libraries</value></data>
   <data name="ConfirmBulkFixTitle" xml:space="preserve"><value>Queue bulk fixes?</value></data>
   <data name="ConfirmBulkFixMessage" xml:space="preserve"><value>{0} item(s) will be processed for "{1}" ({2}) in {3}. This queues background tasks and may load the server for a long time.
+
+{4}</value></data>
+  <data name="ConfirmBulkFixMessage_MergeDuplicates" xml:space="preserve"><value>{0} item(s) will be merged for "{1}" ({2}) in {3}.
 
 {4}</value></data>
   <data name="ConfirmBulkFixConfirm" xml:space="preserve"><value>Queue</value></data>
@@ -134,6 +139,8 @@ What to expect: a theme file may be produced when usable intro audio exists. Oth
 What to expect: Intro/Outro segments appear when the detector finds a reliable match. Short seasons or weak similarity can yield no segments.</value></data>
   <data name="ConfirmBulkFixDetail_MissingAudioAnalysis" xml:space="preserve"><value>What happens: queues audio analysis (AudioMuse) for music tracks.
 What to expect: analysis completes for processable tracks. Failures leave analysis missing.</value></data>
+  <data name="ConfirmBulkFixDetail_DuplicateExternalId" xml:space="preserve"><value>What happens: merges medias that share a provider id. The entry with the most episodes, tracks, or files is kept. Seasons, tracks, albums, files, and user state move with it. The same recording on two albums is not merged.
+What to expect: the duplicate disappears when the empty entry can be deleted. If something still blocks deletion, the source entry is kept.</value></data>
   <data name="InaccessiblePath" xml:space="preserve"><value>Inaccessible path</value></data>
   <data name="FilterBy" xml:space="preserve"><value>Filter</value></data>
   <data name="FilterWorkClass" xml:space="preserve"><value>Work class</value></data>

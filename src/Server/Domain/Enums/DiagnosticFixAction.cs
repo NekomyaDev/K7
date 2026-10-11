@@ -10,5 +10,6 @@ public enum DiagnosticFixAction
     RetryCreateMedia = 6,
     ExtractChapters = 7,
     ExtractSerieThemeSong = 8,
-    DetectMediaSegments = 9
+    DetectMediaSegments = 9,
+    MergeDuplicateExternalIds = 10
 }
