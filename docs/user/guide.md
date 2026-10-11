@@ -168,6 +168,7 @@ Almost everything personal can be tuned under **Settings**. The administrator ma
 | Video and subtitles | Settings -> Video playback / track selection | Intro skip, short skip durations, subtitle look, resume rules, preferred audio / subtitle languages, open trailers in YouTube - see [Playback](#playback). Native apps also keep per-device audio passthrough, and Android TV adds playback buffer size, HDMI auto frame rate, and Dolby Vision decode. Windows can launch MPC-HC / MPC-BE |
 | Music player | Settings -> Audio playback | Music preferences: loudness normalization, equalizer, crossfade, autoplay, streaming quality, player behavior, resume, remember music session |
 | Offline | Settings -> Offline | Storage and network rules on native apps - see [Offline downloads](#offline-downloads) |
+| About | Settings -> About | Server and client versions link to the matching GitHub release notes. GitHub opens the repository. Documentation opens the user guide, or the docs index for administrators |
 
 Session **quality** stays in the player menu only (not a saved preference).
 

@@ -20,8 +20,12 @@
   <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
   <resheader name="version"><value>2.0</value></resheader>
   <data name="PageTitle" xml:space="preserve"><value>About</value></data>
-  <data name="Subtitle" xml:space="preserve"><value>Version and credits.</value></data>
+  <data name="Subtitle" xml:space="preserve"><value>Version, links, and credits.</value></data>
   <data name="Version" xml:space="preserve"><value>Version</value></data>
+  <data name="ReleaseNotes" xml:space="preserve"><value>Release notes</value></data>
+  <data name="Links" xml:space="preserve"><value>Links</value></data>
+  <data name="GitHub" xml:space="preserve"><value>GitHub</value></data>
+  <data name="Documentation" xml:space="preserve"><value>Documentation</value></data>
   <data name="ServerVersion" xml:space="preserve"><value>Server</value></data>
   <data name="ClientVersion" xml:space="preserve"><value>Client</value></data>
   <data name="BuiltWith" xml:space="preserve"><value>Built with</value></data>

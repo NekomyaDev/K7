@@ -13,9 +13,49 @@
         <h6 class="about-section-title">@L["Version"]</h6>
         <div class="about-version-grid">
             <span class="about-label">@L["ServerVersion"]</span>
-            <span class="about-value" title="@_serverVersion">@ServerVersionDisplay</span>
+            <span class="about-value" title="@_serverVersion">
+                @if (ServerReleaseNotesUrl is string serverReleaseNotesUrl)
+                {
+                    <a href="@serverReleaseNotesUrl" target="_blank" rel="noopener" class="about-version-link focusable" title="@L["ReleaseNotes"]">
+                        @ServerVersionDisplay
+                        <K7Icon Icon="@Phosphor.ArrowSquareOut" IconSize="@K7IconSize.Xs" />
+                    </a>
+                }
+                else
+                {
+                    @ServerVersionDisplay
+                }
+            </span>
             <span class="about-label">@L["ClientVersion"]</span>
-            <span class="about-value" title="@_clientVersion">@ClientVersionDisplay</span>
+            <span class="about-value" title="@_clientVersion">
+                @if (ClientReleaseNotesUrl is string clientReleaseNotesUrl)
+                {
+                    <a href="@clientReleaseNotesUrl" target="_blank" rel="noopener" class="about-version-link focusable" title="@L["ReleaseNotes"]">
+                        @ClientVersionDisplay
+                        <K7Icon Icon="@Phosphor.ArrowSquareOut" IconSize="@K7IconSize.Xs" />
+                    </a>
+                }
+                else
+                {
+                    @ClientVersionDisplay
+                }
+            </span>
+        </div>
+    </section>
+
+    <section class="about-section">
+        <h6 class="about-section-title">@L["Links"]</h6>
+        <div class="about-links">
+            <a href="@RepositoryUrl" target="_blank" rel="noopener" class="about-link focusable">
+                <K7Icon Icon="@Phosphor.GithubLogo" IconSize="@K7IconSize.Sm" />
+                @L["GitHub"]
+                <K7Icon Icon="@Phosphor.ArrowSquareOut" IconSize="@K7IconSize.Xs" />
+            </a>
+            <a href="@DocsUrl" target="_blank" rel="noopener" class="about-link focusable">
+                <K7Icon Icon="@Phosphor.BookOpen" IconSize="@K7IconSize.Sm" />
+                @L["Documentation"]
+                <K7Icon Icon="@Phosphor.ArrowSquareOut" IconSize="@K7IconSize.Xs" />
+            </a>
         </div>
     </section>
 
@@ -43,94 +83,94 @@
             <K7Paper Outlined="true" Elevation="0" Class="admin-surface-card about-credit-card">
                 <img src="_content/K7.Clients.Shared.UI/images/logos/ffmpeg.svg" alt="FFmpeg" class="about-credit-logo" />
                 <div class="about-credit-text">
-                    <a href="https://ffmpeg.org" target="_blank" rel="noopener" class="about-credit-link">FFmpeg <K7Icon Icon="@Phosphor.ArrowSquareOut"  IconSize="@K7IconSize.Xs" /></a>
+                    <a href="https://ffmpeg.org" target="_blank" rel="noopener" class="about-credit-link focusable">FFmpeg <K7Icon Icon="@Phosphor.ArrowSquareOut"  IconSize="@K7IconSize.Xs" /></a>
                     <span class="about-credit-desc">@L["CreditFfmpeg"]</span>
                 </div>
             </K7Paper>
             <K7Paper Outlined="true" Elevation="0" Class="admin-surface-card about-credit-card">
                 <div class="about-credit-text">
-                    <a href="https://www.videolan.org/vlc/libvlc.html" target="_blank" rel="noopener" class="about-credit-link">LibVLC <K7Icon Icon="@Phosphor.ArrowSquareOut"  IconSize="@K7IconSize.Xs" /></a>
+                    <a href="https://www.videolan.org/vlc/libvlc.html" target="_blank" rel="noopener" class="about-credit-link focusable">LibVLC <K7Icon Icon="@Phosphor.ArrowSquareOut"  IconSize="@K7IconSize.Xs" /></a>
                     <span class="about-credit-desc">@L["CreditLibVlc"]</span>
                 </div>
             </K7Paper>
             <K7Paper Outlined="true" Elevation="0" Class="admin-surface-card about-credit-card">
                 <img src="_content/K7.Clients.Shared.UI/images/logos/openiddict.png" alt="OpenIddict" class="about-credit-logo" />
                 <div class="about-credit-text">
-                    <a href="https://github.com/openiddict/openiddict-core" target="_blank" rel="noopener" class="about-credit-link">OpenIddict <K7Icon Icon="@Phosphor.ArrowSquareOut"  IconSize="@K7IconSize.Xs" /></a>
+                    <a href="https://github.com/openiddict/openiddict-core" target="_blank" rel="noopener" class="about-credit-link focusable">OpenIddict <K7Icon Icon="@Phosphor.ArrowSquareOut"  IconSize="@K7IconSize.Xs" /></a>
                     <span class="about-credit-desc">@L["CreditOpenIddict"]</span>
                 </div>
             </K7Paper>
             <K7Paper Outlined="true" Elevation="0" Class="admin-surface-card about-credit-card">
                 <img src="_content/K7.Clients.Shared.UI/images/logos/musicbrainz.svg" alt="MusicBrainz" class="about-credit-logo" />
                 <div class="about-credit-text">
-                    <a href="https://musicbrainz.org" target="_blank" rel="noopener" class="about-credit-link">MusicBrainz <K7Icon Icon="@Phosphor.ArrowSquareOut"  IconSize="@K7IconSize.Xs" /></a>
+                    <a href="https://musicbrainz.org" target="_blank" rel="noopener" class="about-credit-link focusable">MusicBrainz <K7Icon Icon="@Phosphor.ArrowSquareOut"  IconSize="@K7IconSize.Xs" /></a>
                     <span class="about-credit-desc">@L["CreditMusicBrainz"]</span>
                 </div>
             </K7Paper>
             <K7Paper Outlined="true" Elevation="0" Class="admin-surface-card about-credit-card">
                 <img src="_content/K7.Clients.Shared.UI/images/logos/tmdb.svg" alt="TMDb" class="about-credit-logo" />
                 <div class="about-credit-text">
-                    <a href="https://www.themoviedb.org" target="_blank" rel="noopener" class="about-credit-link">TMDb <K7Icon Icon="@Phosphor.ArrowSquareOut"  IconSize="@K7IconSize.Xs" /></a>
+                    <a href="https://www.themoviedb.org" target="_blank" rel="noopener" class="about-credit-link focusable">TMDb <K7Icon Icon="@Phosphor.ArrowSquareOut"  IconSize="@K7IconSize.Xs" /></a>
                     <span class="about-credit-desc">@L["CreditTmdb"]</span>
                 </div>
             </K7Paper>
             <K7Paper Outlined="true" Elevation="0" Class="admin-surface-card about-credit-card">
                 <img src="_content/K7.Clients.Shared.UI/images/logos/tvdb.png" alt="TheTVDB" class="about-credit-logo about-credit-logo--tvdb" />
                 <div class="about-credit-text">
-                    <a href="https://www.thetvdb.com" target="_blank" rel="noopener" class="about-credit-link">TheTVDB <K7Icon Icon="@Phosphor.ArrowSquareOut"  IconSize="@K7IconSize.Xs" /></a>
+                    <a href="https://www.thetvdb.com" target="_blank" rel="noopener" class="about-credit-link focusable">TheTVDB <K7Icon Icon="@Phosphor.ArrowSquareOut"  IconSize="@K7IconSize.Xs" /></a>
                     <span class="about-credit-desc">@L["CreditTvdb"]</span>
                 </div>
             </K7Paper>
             <K7Paper Outlined="true" Elevation="0" Class="admin-surface-card about-credit-card">
                 <img src="_content/K7.Clients.Shared.UI/images/logos/wikimedia.svg" alt="Wikimedia Commons" class="about-credit-logo" />
                 <div class="about-credit-text">
-                    <a href="https://commons.wikimedia.org" target="_blank" rel="noopener" class="about-credit-link">Wikimedia Commons <K7Icon Icon="@Phosphor.ArrowSquareOut"  IconSize="@K7IconSize.Xs" /></a>
+                    <a href="https://commons.wikimedia.org" target="_blank" rel="noopener" class="about-credit-link focusable">Wikimedia Commons <K7Icon Icon="@Phosphor.ArrowSquareOut"  IconSize="@K7IconSize.Xs" /></a>
                     <span class="about-credit-desc">@L["CreditWikimedia"]</span>
                 </div>
             </K7Paper>
             <K7Paper Outlined="true" Elevation="0" Class="admin-surface-card about-credit-card">
                 <img src="_content/K7.Clients.Shared.UI/images/logos/acoustid.svg" alt="AcoustID" class="about-credit-logo" />
                 <div class="about-credit-text">
-                    <a href="https://acoustid.org/chromaprint" target="_blank" rel="noopener" class="about-credit-link">Chromaprint / AcoustID <K7Icon Icon="@Phosphor.ArrowSquareOut"  IconSize="@K7IconSize.Xs" /></a>
+                    <a href="https://acoustid.org/chromaprint" target="_blank" rel="noopener" class="about-credit-link focusable">Chromaprint / AcoustID <K7Icon Icon="@Phosphor.ArrowSquareOut"  IconSize="@K7IconSize.Xs" /></a>
                     <span class="about-credit-desc">@L["CreditChromaprint"]</span>
                 </div>
             </K7Paper>
             <K7Paper Outlined="true" Elevation="0" Class="admin-surface-card about-credit-card">
                 <img src="_content/K7.Clients.Shared.UI/images/logos/audiomuse.png" alt="AudioMuse AI" class="about-credit-logo" />
                 <div class="about-credit-text">
-                    <a href="https://github.com/NeptuneHub/AudioMuse-AI" target="_blank" rel="noopener" class="about-credit-link">AudioMuse AI <K7Icon Icon="@Phosphor.ArrowSquareOut"  IconSize="@K7IconSize.Xs" /></a>
+                    <a href="https://github.com/NeptuneHub/AudioMuse-AI" target="_blank" rel="noopener" class="about-credit-link focusable">AudioMuse AI <K7Icon Icon="@Phosphor.ArrowSquareOut"  IconSize="@K7IconSize.Xs" /></a>
                     <span class="about-credit-desc">@L["CreditAudioMuse"]</span>
                 </div>
             </K7Paper>
             <K7Paper Outlined="true" Elevation="0" Class="admin-surface-card about-credit-card">
                 <div class="about-credit-text">
-                    <a href="https://github.com/mono/taglib-sharp" target="_blank" rel="noopener" class="about-credit-link">TagLibSharp <K7Icon Icon="@Phosphor.ArrowSquareOut"  IconSize="@K7IconSize.Xs" /></a>
+                    <a href="https://github.com/mono/taglib-sharp" target="_blank" rel="noopener" class="about-credit-link focusable">TagLibSharp <K7Icon Icon="@Phosphor.ArrowSquareOut"  IconSize="@K7IconSize.Xs" /></a>
                     <span class="about-credit-desc">@L["CreditTagLib"]</span>
                 </div>
             </K7Paper>
             <K7Paper Outlined="true" Elevation="0" Class="admin-surface-card about-credit-card">
                 <img src="_content/K7.Clients.Shared.UI/images/logos/mediatr.png" alt="MediatR" class="about-credit-logo" />
                 <div class="about-credit-text">
-                    <a href="https://github.com/jbogard/MediatR" target="_blank" rel="noopener" class="about-credit-link">MediatR <K7Icon Icon="@Phosphor.ArrowSquareOut"  IconSize="@K7IconSize.Xs" /></a>
+                    <a href="https://github.com/jbogard/MediatR" target="_blank" rel="noopener" class="about-credit-link focusable">MediatR <K7Icon Icon="@Phosphor.ArrowSquareOut"  IconSize="@K7IconSize.Xs" /></a>
                     <span class="about-credit-desc">@L["CreditMediatR"]</span>
                 </div>
             </K7Paper>
             <K7Paper Outlined="true" Elevation="0" Class="admin-surface-card about-credit-card">
                 <div class="about-credit-text">
-                    <a href="https://learn.microsoft.com/ef/core/" target="_blank" rel="noopener" class="about-credit-link">Entity Framework Core <K7Icon Icon="@Phosphor.ArrowSquareOut"  IconSize="@K7IconSize.Xs" /></a>
+                    <a href="https://learn.microsoft.com/ef/core/" target="_blank" rel="noopener" class="about-credit-link focusable">Entity Framework Core <K7Icon Icon="@Phosphor.ArrowSquareOut"  IconSize="@K7IconSize.Xs" /></a>
                     <span class="about-credit-desc">@L["CreditEfCore"]</span>
                 </div>
             </K7Paper>
             <K7Paper Outlined="true" Elevation="0" Class="admin-surface-card about-credit-card">
                 <div class="about-credit-text">
-                    <a href="https://learn.microsoft.com/aspnet/signalr/" target="_blank" rel="noopener" class="about-credit-link">SignalR <K7Icon Icon="@Phosphor.ArrowSquareOut"  IconSize="@K7IconSize.Xs" /></a>
+                    <a href="https://learn.microsoft.com/aspnet/signalr/" target="_blank" rel="noopener" class="about-credit-link focusable">SignalR <K7Icon Icon="@Phosphor.ArrowSquareOut"  IconSize="@K7IconSize.Xs" /></a>
                     <span class="about-credit-desc">@L["CreditSignalR"]</span>
                 </div>
             </K7Paper>
             <K7Paper Outlined="true" Elevation="0" Class="admin-surface-card about-credit-card">
                 <K7Icon Icon="@Phosphor.PhosphorLogo" Class="about-credit-logo about-credit-logo--icon" />
                 <div class="about-credit-text">
-                    <a href="https://phosphoricons.com" target="_blank" rel="noopener" class="about-credit-link">Phosphor Icons <K7Icon Icon="@Phosphor.ArrowSquareOut"  IconSize="@K7IconSize.Xs" /></a>
+                    <a href="https://phosphoricons.com" target="_blank" rel="noopener" class="about-credit-link focusable">Phosphor Icons <K7Icon Icon="@Phosphor.ArrowSquareOut"  IconSize="@K7IconSize.Xs" /></a>
                     <span class="about-credit-desc">@L["CreditPhosphor"]</span>
                 </div>
             </K7Paper>

@@ -1,4 +1,6 @@
 using System.Reflection;
+using K7.Clients.Shared.Services;
+using K7.Server.Domain.Constants;
 using K7.Shared.Interfaces;
 using Microsoft.AspNetCore.Components;
 
@@ -7,15 +9,27 @@ namespace K7.Clients.Shared.UI.Pages;
 public partial class SettingsAboutPage
 {
     [Inject] private IServerInfoService ServerInfoService { get; set; } = default!;
+    [Inject] private IFeatureAccessService FeatureAccess { get; set; } = default!;
+
+    private const string RepositoryUrl = "https://github.com/kaybi-gh/K7";
+    private const string UserDocsUrl = "https://github.com/kaybi-gh/K7/blob/main/docs/user/guide.md";
+    private const string AdminDocsUrl = "https://github.com/kaybi-gh/K7/blob/main/docs/README.md";
 
     private string? _serverVersion;
     private string _clientVersion = string.Empty;
+    private bool _isAdmin;
 
     private string ServerVersionDisplay => GetVersionWithoutHash(_serverVersion) ?? "...";
     private string ClientVersionDisplay => GetVersionWithoutHash(_clientVersion) ?? "...";
+    private string? ServerReleaseNotesUrl => GetReleaseNotesUrl(_serverVersion);
+    private string? ClientReleaseNotesUrl => GetReleaseNotesUrl(_clientVersion);
+    private string DocsUrl => _isAdmin ? AdminDocsUrl : UserDocsUrl;
 
     protected override async Task OnInitializedAsync()
     {
+        var role = await FeatureAccess.GetRoleAsync();
+        _isAdmin = role == Roles.Administrator;
+
         _clientVersion = Assembly.GetExecutingAssembly()
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
             ?? "unknown";
@@ -36,5 +50,15 @@ public partial class SettingsAboutPage
         if (string.IsNullOrEmpty(version)) return version;
         var plusIndex = version.IndexOf('+');
         return plusIndex > 0 ? version[..plusIndex] : version;
+    }
+
+    private static string? GetReleaseNotesUrl(string? version)
+    {
+        var display = GetVersionWithoutHash(version);
+        if (string.IsNullOrWhiteSpace(display) || display == "unknown")
+            return null;
+
+        var tag = display.StartsWith('v') ? display : $"v{display}";
+        return $"{RepositoryUrl}/releases/tag/{Uri.EscapeDataString(tag)}";
     }
 }
