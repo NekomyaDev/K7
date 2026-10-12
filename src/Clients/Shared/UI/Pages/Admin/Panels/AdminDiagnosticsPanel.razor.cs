@@ -191,10 +191,7 @@ public partial class AdminDiagnosticsPanel : IDisposable
         try
         {
             var result = await DiagnosticsService.QueueDiagnosticFixesAsync(issue, _filterLibraryId);
-            var queuedKey = action == DiagnosticFixAction.MergeDuplicateExternalIds
-                ? "DuplicatesMerged"
-                : "AllFixesQueued";
-            Snackbar.Add(string.Format(L[queuedKey], result), K7Severity.Success);
+            Snackbar.Add(string.Format(L["AllFixesQueued"], result), K7Severity.Success);
             await LoadAsync();
         }
         catch (Exception ex)
@@ -254,6 +251,7 @@ public partial class AdminDiagnosticsPanel : IDisposable
             DiagnosticIssue.MissingIntroOutro => DiagnosticFixAction.DetectMediaSegments,
             DiagnosticIssue.OrphanFile => DiagnosticFixAction.RetryCreateMedia,
             DiagnosticIssue.DuplicateExternalId => DiagnosticFixAction.MergeDuplicateExternalIds,
+            DiagnosticIssue.SuspectedDuplicateMedia => DiagnosticFixAction.MergeNamedDuplicates,
             _ => null
         };
 
@@ -269,6 +267,7 @@ public partial class AdminDiagnosticsPanel : IDisposable
         DiagnosticFixAction.AnalyzeMusicTrackAudio => L["ActionAnalyzeAudio"],
         DiagnosticFixAction.RetryCreateMedia => L["ActionRetryCreateMedia"],
         DiagnosticFixAction.MergeDuplicateExternalIds => L["ActionMergeDuplicates"],
+        DiagnosticFixAction.MergeNamedDuplicates => L["ActionMergeDuplicates"],
         _ => action.ToString()
     };
 

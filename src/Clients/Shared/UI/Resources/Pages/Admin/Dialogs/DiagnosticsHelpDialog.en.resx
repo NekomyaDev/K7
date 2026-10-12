@@ -37,8 +37,8 @@
   <data name="Def_OrphanFile" xml:space="preserve"><value>Indexed file on disk that is not attached to a navigable media, including files whose filename could not be parsed. After a successful re-identify the file drops off even if filename identification is still missing.</value></data>
   <data name="Def_MissingFileMetadata" xml:space="preserve"><value>The file has not been probed yet (ffprobe): codecs, duration, and embedded chapters are missing for playback.</value></data>
   <data name="Def_InaccessiblePath" xml:space="preserve"><value>The configured library path is unreachable (mount, permissions, disconnected volume).</value></data>
-  <data name="Def_DuplicateExternalId" xml:space="preserve"><value>Two local medias with the same peer share the same provider id. The same recording on different albums is not counted.</value></data>
-  <data name="Def_SuspectedDuplicateMedia" xml:space="preserve"><value>Two medias of the same type share a normalized title and year in one library. Noisier (homonyms exist).</value></data>
+  <data name="Def_DuplicateExternalId" xml:space="preserve"><value>Two local medias, or two persons, with the same peer share the same provider id. The same recording on different albums is not counted.</value></data>
+  <data name="Def_SuspectedDuplicateMedia" xml:space="preserve"><value>Movies and series share a normalized title and year in one library. Albums also share the artist name. Music artists and persons share a normalized name when they are not already distinct provider identities. Namesakes that each have their own provider id stay out. A copy with no provider id joins one identified namesake, or other copies that also have none, including a copy with no files of its own.</value></data>
   <data name="Def_MissingExternalId" xml:space="preserve"><value>The media has no provider id (TMDb, TVDB, MusicBrainz...). Identification likely failed.</value></data>
   <data name="Def_MissingMetadata" xml:space="preserve"><value>Genres are missing on a movie, series, album, or track. An artist with no formation date is included too. Episodes and seasons are not.</value></data>
   <data name="Def_MissingPictures" xml:space="preserve"><value>Expected posters, covers, or artwork are missing for this media.</value></data>
@@ -62,9 +62,10 @@
   <data name="Bulk_MissingThemeSong" xml:space="preserve"><value>Queues theme song generation (ExtractSerieThemeSong), or intro detection when needed.</value></data>
   <data name="Bulk_MissingIntroOutro" xml:space="preserve"><value>Queues season-level intro/outro detection (DetectMediaSegments).</value></data>
   <data name="Bulk_MissingAudioAnalysis" xml:space="preserve"><value>Queues track audio analysis (AnalyzeMusicTrackAudio).</value></data>
-  <data name="Bulk_DuplicateExternalId" xml:space="preserve"><value>Merges medias that share a provider id. The entry with the most episodes, tracks, or files is kept, and user state is moved. The same recording on different albums is not merged.</value></data>
+  <data name="Bulk_DuplicateExternalId" xml:space="preserve"><value>Merges medias and persons that share a provider id. The entry with the most episodes, tracks, files, or roles is kept, and user state is moved. The same recording on different albums is not merged.</value></data>
+  <data name="Bulk_SuspectedDuplicateMedia" xml:space="preserve"><value>Merges music artists and persons that share a normalized name and are not already distinct provider identities. A copy with no provider id joins one identified namesake, or other copies that also have none. The entry with the most albums, tracks, or roles is kept. Movies, series, and albums stay listed for review.</value></data>
 
   <data name="Manual_InaccessiblePath" xml:space="preserve"><value>Manual action: grant K7 read access to the library folder (OS permissions, mount, reconnect the volume).</value></data>
   <data name="Manual_DuplicateExternalId" xml:space="preserve"><value>Use Fix all to merge medias that share a provider id. The same recording on different albums stays separate.</value></data>
-  <data name="Manual_SuspectedDuplicateMedia" xml:space="preserve"><value>No in-app remediation yet. Review the medias and correct manually if needed (including in the database).</value></data>
+  <data name="Manual_SuspectedDuplicateMedia" xml:space="preserve"><value>Use Fix all to merge music artists and persons that share a normalized name and are not already distinct provider identities. Movies, series, and albums stay listed for review.</value></data>
 </root>

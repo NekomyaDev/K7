@@ -49,7 +49,7 @@
   <data name="ActionExtractThemeSong" xml:space="preserve"><value>Générer le thème</value></data>
   <data name="MissingIntroOutro" xml:space="preserve"><value>Intro/outro manquant</value></data>
   <data name="DuplicateExternalId" xml:space="preserve"><value>Doublon (identifiant externe partagé)</value></data>
-  <data name="SuspectedDuplicateMedia" xml:space="preserve"><value>Doublon suspecté (titre et année identiques)</value></data>
+  <data name="SuspectedDuplicateMedia" xml:space="preserve"><value>Doublon suspecté (même identité)</value></data>
   <data name="ActionDetectIntroOutro" xml:space="preserve"><value>Détecter intros/outros</value></data>
   <data name="MissingAudioAnalysis" xml:space="preserve"><value>Analyse audio manquante</value></data>
   <data name="MissingMembers" xml:space="preserve"><value>Membres manquants</value></data>
@@ -65,6 +65,7 @@
   <data name="EntityTypeMedia" xml:space="preserve"><value>Média</value></data>
   <data name="EntityTypeIndexedFile" xml:space="preserve"><value>Fichier source</value></data>
   <data name="EntityTypeLibrary" xml:space="preserve"><value>Bibliothèque</value></data>
+  <data name="EntityTypePerson" xml:space="preserve"><value>Personne</value></data>
   <data name="MediaTypeMovie" xml:space="preserve"><value>Film</value></data>
   <data name="MediaTypeSerie" xml:space="preserve"><value>Série</value></data>
   <data name="MediaTypeSerieSeason" xml:space="preserve"><value>Saison</value></data>
@@ -140,8 +141,10 @@ Résultat attendu : un fichier thème peut être produit si un audio d'intro uti
 Résultat attendu : des segments Intro/Outro apparaissent si le détecteur trouve une correspondance fiable. Saisons courtes ou similarité faible peuvent ne rien trouver.</value></data>
   <data name="ConfirmBulkFixDetail_MissingAudioAnalysis" xml:space="preserve"><value>Ce qui se passe : file l'analyse audio (AudioMuse) des pistes.
 Résultat attendu : l'analyse se termine pour les pistes traitables. En cas d'échec, l'analyse reste manquante.</value></data>
-  <data name="ConfirmBulkFixDetail_DuplicateExternalId" xml:space="preserve"><value>Ce qui se passe : fusionne les médias qui partagent un identifiant fournisseur. La fiche qui a le plus d'épisodes, de pistes ou de fichiers est gardée. Saisons, pistes, albums, fichiers et état utilisateur sont déplacés. Un même morceau sur deux albums n'est pas fusionné.
+  <data name="ConfirmBulkFixDetail_DuplicateExternalId" xml:space="preserve"><value>Ce qui se passe : fusionne les médias et les personnes qui partagent un identifiant fournisseur. La fiche qui a le plus d'épisodes, de pistes, de fichiers ou de rôles est gardée. Saisons, pistes, albums, fichiers, rôles et état utilisateur sont déplacés. Un même morceau sur deux albums n'est pas fusionné.
 Résultat attendu : le doublon disparaît quand la fiche vide peut être supprimée. S'il reste des données qui empêchent la suppression, la fiche source est conservée.</value></data>
+  <data name="ConfirmBulkFixDetail_SuspectedDuplicateMedia" xml:space="preserve"><value>Ce qui se passe : fusionne les artistes musicaux et les personnes qui partagent un nom normalisé et ne sont pas déjà des identités fournisseur distinctes. Une copie sans identifiant rejoint un seul homonyme identifié, ou d'autres copies sans identifiant. La fiche qui a le plus d'albums, de pistes ou de rôles est gardée. Les films, séries et albums de cette liste ne sont pas fusionnés.
+Résultat attendu : l'artiste ou la personne en double disparaît quand la fiche vide peut être supprimée.</value></data>
   <data name="InaccessiblePath" xml:space="preserve"><value>Chemin inaccessible</value></data>
   <data name="FilterBy" xml:space="preserve"><value>Filtrer</value></data>
   <data name="FilterWorkClass" xml:space="preserve"><value>Classe de travail</value></data>

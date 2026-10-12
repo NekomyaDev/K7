@@ -11,5 +11,6 @@ public enum DiagnosticFixAction
     ExtractChapters = 7,
     ExtractSerieThemeSong = 8,
     DetectMediaSegments = 9,
-    MergeDuplicateExternalIds = 10
+    MergeDuplicateExternalIds = 10,
+    MergeNamedDuplicates = 11
 }

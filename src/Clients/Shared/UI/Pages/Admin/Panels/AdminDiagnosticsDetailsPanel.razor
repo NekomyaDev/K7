@@ -181,7 +181,7 @@
                                     }
                                     @foreach (var action in GetVisibleIssues(context)
                                                   .Select(GetFixActionForIssue)
-                                                  .Where(action => action is not null)
+                                                  .Where(action => action is not null && FixActionApplies(context, action.Value))
                                                   .Select(action => action!.Value)
                                                   .Distinct())
                                     {

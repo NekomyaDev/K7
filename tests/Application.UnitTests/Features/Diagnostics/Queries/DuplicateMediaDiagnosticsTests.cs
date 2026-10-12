@@ -4,6 +4,8 @@ using K7.Server.Application.Features.Diagnostics.Queries.GetDiagnosticsSummary;
 using K7.Server.Domain.Entities;
 using K7.Server.Domain.Entities.Federation;
 using K7.Server.Domain.Entities.Medias;
+using K7.Server.Domain.Entities.Metadatas;
+using K7.Server.Domain.Entities.Metadatas.PersonRoles;
 using K7.Server.Domain.Enums;
 using K7.Server.Infrastructure.Database.Context.Data;
 using K7.Shared.Dtos.Diagnostics;
@@ -365,6 +367,216 @@ public class DuplicateMediaDiagnosticsTests
     }
 
     [Test]
+    public async Task Handle_ShouldNotReportSuspectedDuplicate_WhenAlbumsShareTitleAndYearButNotArtist()
+    {
+        var queen = AddArtist("Queen");
+        var bowie = AddArtist("David Bowie");
+        AddReleasedAlbum("Greatest Hits", 1981, queen);
+        AddReleasedAlbum("Greatest Hits", 1981, bowie);
+        await _context.SaveChangesAsync();
+
+        var items = await QueryItemsAsync(DiagnosticIssue.SuspectedDuplicateMedia);
+
+        items.Should().BeEmpty();
+    }
+
+    [Test]
+    public async Task Handle_ShouldReportSuspectedDuplicate_WhenAlbumsShareTitleYearAndArtist()
+    {
+        var queen = AddArtist("Queen");
+        var first = AddReleasedAlbum("Greatest Hits", 1981, queen);
+        var second = AddReleasedAlbum("  greatest hits ", 1981, queen);
+        await _context.SaveChangesAsync();
+
+        var items = await QueryItemsAsync(DiagnosticIssue.SuspectedDuplicateMedia);
+
+        items.Select(i => i.EntityId).Should().BeEquivalentTo([first, second]);
+    }
+
+    [Test]
+    public async Task Handle_ShouldReportSuspectedDuplicate_WhenAlbumsShareCreditArtistAndHaveNoPrimaryArtist()
+    {
+        var queen = AddArtist("Queen");
+        var bowie = AddArtist("David Bowie");
+        var sameA = AddReleasedAlbum("Greatest Hits", 1981, artistId: null);
+        var sameB = AddReleasedAlbum("Greatest Hits", 1981, artistId: null);
+        var other = AddReleasedAlbum("Greatest Hits", 1981, artistId: null);
+        AddCredit(sameA, queen);
+        AddCredit(sameB, queen);
+        AddCredit(other, bowie);
+        await _context.SaveChangesAsync();
+
+        var items = await QueryItemsAsync(DiagnosticIssue.SuspectedDuplicateMedia);
+
+        items.Select(i => i.EntityId).Should().BeEquivalentTo([sameA, sameB]);
+    }
+
+    [Test]
+    public async Task Handle_ShouldNotReportSuspectedDuplicate_WhenArtistsShareProviderIdAndName()
+    {
+        var first = AddArtist("Daft Punk");
+        var second = AddArtist("daft punk");
+        AddExternalId(first, "musicbrainz", "artist-1");
+        AddExternalId(second, "musicbrainz", "artist-1");
+        await _context.SaveChangesAsync();
+
+        var suspected = await QueryItemsAsync(DiagnosticIssue.SuspectedDuplicateMedia);
+        var duplicates = await QueryItemsAsync(DiagnosticIssue.DuplicateExternalId);
+
+        suspected.Should().BeEmpty();
+        duplicates.Select(i => i.EntityId).Should().BeEquivalentTo([first, second]);
+    }
+
+    [Test]
+    public async Task Handle_ShouldNotReportSuspectedDuplicate_WhenPersonsShareProviderIdAndName()
+    {
+        var first = new Person { Id = Guid.NewGuid(), Name = "Ada Lovelace" };
+        var second = new Person { Id = Guid.NewGuid(), Name = "ada lovelace" };
+        _context.Persons.AddRange(first, second);
+        AddPersonExternalId(first.Id, "musicbrainz", "person-1");
+        AddPersonExternalId(second.Id, "musicbrainz", "person-1");
+        await _context.SaveChangesAsync();
+
+        var suspected = await QueryItemsAsync(DiagnosticIssue.SuspectedDuplicateMedia);
+        var duplicates = await QueryItemsAsync(DiagnosticIssue.DuplicateExternalId);
+
+        suspected.Should().BeEmpty();
+        duplicates.Select(i => i.EntityId).Should().BeEquivalentTo([first.Id, second.Id]);
+    }
+
+    [Test]
+    public async Task Handle_ShouldNotReportSuspectedDuplicate_WhenArtistsHaveDistinctProviderIds()
+    {
+        var first = AddArtist("John Smith");
+        var second = AddArtist("John Smith");
+        AddExternalId(first, "musicbrainz", "artist-a");
+        AddExternalId(second, "musicbrainz", "artist-b");
+        await _context.SaveChangesAsync();
+
+        var suspected = await QueryItemsAsync(DiagnosticIssue.SuspectedDuplicateMedia);
+
+        suspected.Should().BeEmpty();
+    }
+
+    [Test]
+    public async Task Handle_ShouldReportSuspectedDuplicate_WhenArtistCopyHasNoProviderId()
+    {
+        var identified = AddArtist("Daft Punk");
+        var shell = AddArtist("Daft Punk");
+        AddExternalId(identified, "musicbrainz", "artist-1");
+        await _context.SaveChangesAsync();
+
+        var items = await QueryItemsAsync(DiagnosticIssue.SuspectedDuplicateMedia);
+
+        items.Select(i => i.EntityId).Should().BeEquivalentTo([identified, shell]);
+    }
+
+    [Test]
+    public async Task Handle_ShouldNotReportSuspectedDuplicate_WhenPersonsHaveDistinctProviderIds()
+    {
+        var first = new Person { Id = Guid.NewGuid(), Name = "John Smith" };
+        var second = new Person { Id = Guid.NewGuid(), Name = "John Smith" };
+        _context.Persons.AddRange(first, second);
+        AddPersonExternalId(first.Id, "tmdb", "1");
+        AddPersonExternalId(second.Id, "tmdb", "2");
+        await _context.SaveChangesAsync();
+
+        var suspected = await QueryItemsAsync(DiagnosticIssue.SuspectedDuplicateMedia);
+
+        suspected.Should().BeEmpty();
+    }
+
+    [Test]
+    public async Task Handle_ShouldReportSuspectedDuplicate_WhenUnidentifiedPersonMatchesOneNamesake()
+    {
+        var identified = new Person { Id = Guid.NewGuid(), Name = "Ada Lovelace" };
+        var shell = new Person { Id = Guid.NewGuid(), Name = "Ada Lovelace" };
+        _context.Persons.AddRange(identified, shell);
+        AddPersonExternalId(identified.Id, "tmdb", "1");
+        await _context.SaveChangesAsync();
+
+        var items = await QueryItemsAsync(DiagnosticIssue.SuspectedDuplicateMedia);
+
+        items.Select(i => i.EntityId).Should().BeEquivalentTo([identified.Id, shell.Id]);
+    }
+
+    [Test]
+    public async Task Handle_ShouldReportOnlyUnidentifiedPersons_WhenSeveralNamesakesAlreadyHaveProviderIds()
+    {
+        var johnA = new Person { Id = Guid.NewGuid(), Name = "John Smith" };
+        var johnB = new Person { Id = Guid.NewGuid(), Name = "John Smith" };
+        var shellA = new Person { Id = Guid.NewGuid(), Name = "John Smith" };
+        var shellB = new Person { Id = Guid.NewGuid(), Name = "John Smith" };
+        _context.Persons.AddRange(johnA, johnB, shellA, shellB);
+        AddPersonExternalId(johnA.Id, "tmdb", "1");
+        AddPersonExternalId(johnB.Id, "tmdb", "2");
+        await _context.SaveChangesAsync();
+
+        var items = await QueryItemsAsync(DiagnosticIssue.SuspectedDuplicateMedia);
+
+        items.Select(i => i.EntityId).Should().BeEquivalentTo([shellA.Id, shellB.Id]);
+    }
+
+    [Test]
+    public async Task Handle_ShouldReportSuspectedDuplicate_WhenArtistsShareNormalizedName()
+    {
+        var first = AddArtist(" Daft Punk ");
+        var second = AddArtist("daft punk");
+        var punctuated = AddArtist("*NSYNC");
+        var plain = AddArtist("NSYNC");
+        await _context.SaveChangesAsync();
+
+        var items = await QueryItemsAsync(DiagnosticIssue.SuspectedDuplicateMedia);
+
+        items.Select(i => i.EntityId).Should().BeEquivalentTo([first, second, punctuated, plain]);
+        items.Should().OnlyContain(i => i.MediaType == MediaType.MusicArtist);
+    }
+
+    [Test]
+    public async Task Handle_ShouldReportSuspectedDuplicate_WhenArtistCopyHasNoLibraryAvailability()
+    {
+        var linked = AddArtist("Daft Punk");
+        var imported = new MusicArtist { Id = Guid.NewGuid(), Title = "Daft Punk" };
+        _context.Medias.Add(imported);
+        await _context.SaveChangesAsync();
+
+        var items = await QueryItemsAsync(DiagnosticIssue.SuspectedDuplicateMedia);
+
+        items.Select(i => i.EntityId).Should().BeEquivalentTo([linked, imported.Id]);
+    }
+
+    [Test]
+    public async Task Handle_ShouldReportSuspectedDuplicate_WhenPersonsShareNormalizedName()
+    {
+        var first = new Person { Id = Guid.NewGuid(), Name = "Ada Lovelace" };
+        var second = new Person { Id = Guid.NewGuid(), Name = " ada lovelace " };
+        _context.Persons.AddRange(first, second);
+        await _context.SaveChangesAsync();
+
+        var items = await QueryItemsAsync(DiagnosticIssue.SuspectedDuplicateMedia);
+
+        items.Select(i => i.EntityId).Should().BeEquivalentTo([first.Id, second.Id]);
+        items.Should().OnlyContain(i => i.EntityType == DiagnosticEntityType.Person);
+    }
+
+    [Test]
+    public async Task Handle_ShouldReportDuplicateExternalId_WhenPersonsShareProviderId()
+    {
+        var first = new Person { Id = Guid.NewGuid(), Name = "Ada" };
+        var second = new Person { Id = Guid.NewGuid(), Name = "Augusta" };
+        _context.Persons.AddRange(first, second);
+        AddPersonExternalId(first.Id, "tmdb", "123");
+        AddPersonExternalId(second.Id, "tmdb", "123");
+        await _context.SaveChangesAsync();
+
+        var items = await QueryItemsAsync(DiagnosticIssue.DuplicateExternalId);
+
+        items.Select(i => i.EntityId).Should().BeEquivalentTo([first.Id, second.Id]);
+        items.Should().OnlyContain(i => i.EntityType == DiagnosticEntityType.Person);
+        items.Should().OnlyContain(i => i.Severity == DiagnosticSeverity.Warning);
+    }
+
+    [Test]
     public async Task Handle_ShouldPageSuspectedDuplicates_WithoutCountingUniqueTitles()
     {
         for (var i = 0; i < 5; i++)
@@ -519,5 +731,41 @@ public class DuplicateMediaDiagnosticsTests
             ProviderName = providerName,
             Value = value,
             MediaId = mediaId
+        });
+
+    private void AddPersonExternalId(Guid personId, string providerName, string value) =>
+        _context.ExternalIds.Add(new ExternalId
+        {
+            Id = Guid.NewGuid(),
+            ProviderName = providerName,
+            Value = value,
+            PersonId = personId
+        });
+
+    private Guid AddReleasedAlbum(string title, int year, Guid? artistId)
+    {
+        var album = new MusicAlbum
+        {
+            Id = Guid.NewGuid(),
+            Title = title,
+            ReleaseDate = new DateOnly(year, 6, 15),
+            ArtistId = artistId
+        };
+        _context.Medias.Add(album);
+        _context.MediaLibraryAvailabilities.Add(new MediaLibraryAvailability
+        {
+            LibraryId = _libraryId,
+            MediaId = album.Id
+        });
+        return album.Id;
+    }
+
+    private void AddCredit(Guid albumId, Guid artistId) =>
+        _context.MusicArtistCredits.Add(new MusicArtistCredit
+        {
+            Id = Guid.NewGuid(),
+            MediaId = albumId,
+            MusicArtistId = artistId,
+            Order = 0
         });
 }

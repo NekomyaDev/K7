@@ -429,8 +429,8 @@ Creating a media is a check-then-insert: look it up by external id, then by titl
 the database prevents a duplicate, since `Medias` has no unique constraint on identity and `ExternalIds`
 is indexed but not unique. Two commands resolving to the same album, serie or movie can legitimately be
 queued at once (two scan batches, a watcher flush racing a scheduled scan, two files of one movie), and
-running concurrently on the `Metadata` lane they would both miss the lookup and both insert. K7 has no
-merge tooling, so a duplicate media is a manual cleanup.
+running concurrently on the `Metadata` lane they would both miss the lookup and both insert. Diagnostics
+can merge some of those duplicates later, but creation itself still has to avoid inserting them.
 
 Media creation is therefore serialized per media identity, on a key built from the library, the media type
 and the same criteria the lookup uses (album plus artist plus year, serie title, movie title plus year).
@@ -443,12 +443,10 @@ Admin -> Diagnostics:
 
 | Diagnostic | Severity | Signal |
 |---|---|---|
-| Duplicate (shared external id) | Warning | Two medias share the same provider id. Reliable. A local media and its federated copy may legitimately share one, so only medias with the same peer are compared. |
-| Suspected duplicate (same title and year) | Info | Two medias of one type share a normalized title and release year in one library. Noisier: homonym movies do exist. |
+| Duplicate (shared external id) | Warning | Two medias, or two persons, share the same provider id on the same peer. A local media and its federated copy may legitimately share one, so only the same peer is compared. The same recording on different albums is not counted. |
+| Suspected duplicate (same identity) | Info | Movies and series: normalized title and release year in one library. Albums also require the same artist name, so two Greatest Hits from different artists stay apart. Music artists and persons: normalized name when they are not already distinct provider identities. A shared provider id stays on the external-id warning. Namesakes that each have their own provider id stay out. A copy with no provider id joins one identified namesake, or other copies that also have none, including a copy with no files of its own (typical of an import). |
 
-Detection only: neither offers a fix action. Merging two medias means re-pointing indexed files, playback
-progress, playlist entries, ratings, reviews, collections, external ids and artwork, and deciding what to do
-with conflicting progress - a feature of its own, not yet implemented.
+Fix all on the shared-external-id issue queues a background merge for those groups. Movies, series, albums, and tracks keep the entry with the most episodes, tracks, albums, or files. Music artists and persons keep the entry with the richest metadata, then the most albums, tracks, credits, or roles, so thin shells are absorbed instead of left as orphans. Cast, crew, and music-artist member roles on the absorbed media are reattached to the survivor (same for artist credits on albums and tracks). Fix all on suspected duplicates queues the same kind of background merge for music artists and persons that share a name and are not already distinct provider identities. Movies, series, and albums in that list stay for review. Selected-item merge uses the same background path.
 
 Provider concurrency on the Metadata lane is fixed at **one in-flight task per metadata
 provider** (`tmdb`, `tvdb`, `auto`, `musicbrainz`, `wikidata`, `wikimedia`, `coverart`, `local`). HTTP pacing

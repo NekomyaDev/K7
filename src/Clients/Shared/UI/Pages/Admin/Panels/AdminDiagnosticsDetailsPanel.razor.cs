@@ -619,10 +619,7 @@ public partial class AdminDiagnosticsDetailsPanel : IDisposable
         try
         {
             var result = await DiagnosticsService.QueueDiagnosticFixesAsync(issue, _filterLibraryId);
-            var queuedKey = action == DiagnosticFixAction.MergeDuplicateExternalIds
-                ? "DuplicatesMerged"
-                : "AllFixesQueued";
-            Snackbar.Add(string.Format(L[queuedKey], result), K7Severity.Success);
+            Snackbar.Add(string.Format(L["AllFixesQueued"], result), K7Severity.Success);
             await LoadAsync();
         }
         catch (Exception ex)
@@ -687,6 +684,11 @@ public partial class AdminDiagnosticsDetailsPanel : IDisposable
         return null;
     }
 
+    private static bool FixActionApplies(DiagnosticItemDto item, DiagnosticFixAction action) =>
+        action != DiagnosticFixAction.MergeNamedDuplicates
+        || item.EntityType == DiagnosticEntityType.Person
+        || item.MediaType == MediaType.MusicArtist;
+
     private static DiagnosticFixAction? GetFixActionForIssue(DiagnosticIssue issue) => issue switch
     {
         DiagnosticIssue.MissingExternalId => DiagnosticFixAction.AutoReidentifyMetadata,
@@ -700,6 +702,7 @@ public partial class AdminDiagnosticsDetailsPanel : IDisposable
         DiagnosticIssue.MissingIntroOutro => DiagnosticFixAction.DetectMediaSegments,
         DiagnosticIssue.OrphanFile => DiagnosticFixAction.RetryCreateMedia,
         DiagnosticIssue.DuplicateExternalId => DiagnosticFixAction.MergeDuplicateExternalIds,
+        DiagnosticIssue.SuspectedDuplicateMedia => DiagnosticFixAction.MergeNamedDuplicates,
         _ => null
     };
 
@@ -715,6 +718,7 @@ public partial class AdminDiagnosticsDetailsPanel : IDisposable
         DiagnosticFixAction.DetectMediaSegments => L["ActionDetectIntroOutro"],
         DiagnosticFixAction.RetryCreateMedia => L["ActionRetryCreateMedia"],
         DiagnosticFixAction.MergeDuplicateExternalIds => L["ActionMergeDuplicates"],
+        DiagnosticFixAction.MergeNamedDuplicates => L["ActionMergeDuplicates"],
         _ => action.ToString()
     };
 
@@ -730,6 +734,7 @@ public partial class AdminDiagnosticsDetailsPanel : IDisposable
         DiagnosticFixAction.DetectMediaSegments => Phosphor.Waveform,
         DiagnosticFixAction.RetryCreateMedia => Phosphor.ArrowClockwise,
         DiagnosticFixAction.MergeDuplicateExternalIds => Phosphor.ArrowsIn,
+        DiagnosticFixAction.MergeNamedDuplicates => Phosphor.ArrowsIn,
         _ => Phosphor.Wrench
     };
 
@@ -782,6 +787,7 @@ public partial class AdminDiagnosticsDetailsPanel : IDisposable
             MediaType.MusicTrack => L["MediaTypeMusicTrack"],
             _ => L["EntityTypeMedia"]
         },
+        DiagnosticEntityType.Person => L["EntityTypePerson"],
         _ => L["EntityTypeMedia"]
     };
 

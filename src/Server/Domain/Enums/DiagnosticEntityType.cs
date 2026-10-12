@@ -4,5 +4,6 @@ public enum DiagnosticEntityType
 {
     Media,
     IndexedFile,
-    Library
+    Library,
+    Person
 }

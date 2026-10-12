@@ -49,7 +49,7 @@
   <data name="ActionExtractThemeSong" xml:space="preserve"><value>Generate theme song</value></data>
   <data name="MissingIntroOutro" xml:space="preserve"><value>Intro/outro missing</value></data>
   <data name="DuplicateExternalId" xml:space="preserve"><value>Duplicate (shared external id)</value></data>
-  <data name="SuspectedDuplicateMedia" xml:space="preserve"><value>Suspected duplicate (same title and year)</value></data>
+  <data name="SuspectedDuplicateMedia" xml:space="preserve"><value>Suspected duplicate (same identity)</value></data>
   <data name="ActionDetectIntroOutro" xml:space="preserve"><value>Detect intros/outros</value></data>
   <data name="MissingAudioAnalysis" xml:space="preserve"><value>Missing audio analysis</value></data>
   <data name="MissingMembers" xml:space="preserve"><value>Missing members</value></data>
@@ -65,6 +65,7 @@
   <data name="EntityTypeMedia" xml:space="preserve"><value>Media</value></data>
   <data name="EntityTypeIndexedFile" xml:space="preserve"><value>Source file</value></data>
   <data name="EntityTypeLibrary" xml:space="preserve"><value>Library</value></data>
+  <data name="EntityTypePerson" xml:space="preserve"><value>Person</value></data>
   <data name="MediaTypeMovie" xml:space="preserve"><value>Movie</value></data>
   <data name="MediaTypeSerie" xml:space="preserve"><value>Series</value></data>
   <data name="MediaTypeSerieSeason" xml:space="preserve"><value>Season</value></data>
@@ -140,8 +141,10 @@ What to expect: a theme file may be produced when usable intro audio exists. Oth
 What to expect: Intro/Outro segments appear when the detector finds a reliable match. Short seasons or weak similarity can yield no segments.</value></data>
   <data name="ConfirmBulkFixDetail_MissingAudioAnalysis" xml:space="preserve"><value>What happens: queues audio analysis (AudioMuse) for music tracks.
 What to expect: analysis completes for processable tracks. Failures leave analysis missing.</value></data>
-  <data name="ConfirmBulkFixDetail_DuplicateExternalId" xml:space="preserve"><value>What happens: merges medias that share a provider id. The entry with the most episodes, tracks, or files is kept. Seasons, tracks, albums, files, and user state move with it. The same recording on two albums is not merged.
+  <data name="ConfirmBulkFixDetail_DuplicateExternalId" xml:space="preserve"><value>What happens: merges medias and persons that share a provider id. The entry with the most episodes, tracks, files, or roles is kept. Seasons, tracks, albums, files, roles, and user state move with it. The same recording on two albums is not merged.
 What to expect: the duplicate disappears when the empty entry can be deleted. If something still blocks deletion, the source entry is kept.</value></data>
+  <data name="ConfirmBulkFixDetail_SuspectedDuplicateMedia" xml:space="preserve"><value>What happens: merges music artists and persons that share a normalized name and are not already distinct provider identities. A copy with no provider id joins one identified namesake, or other copies that also have none. The entry with the most albums, tracks, or roles is kept. Movies, series, and albums in this list are not merged.
+What to expect: the duplicate artist or person disappears when the empty entry can be deleted.</value></data>
   <data name="InaccessiblePath" xml:space="preserve"><value>Inaccessible path</value></data>
   <data name="FilterBy" xml:space="preserve"><value>Filter</value></data>
   <data name="FilterWorkClass" xml:space="preserve"><value>Work class</value></data>

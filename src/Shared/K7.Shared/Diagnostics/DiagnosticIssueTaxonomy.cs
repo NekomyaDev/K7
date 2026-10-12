@@ -172,6 +172,7 @@ public static class DiagnosticIssueTaxonomy
             or DiagnosticIssue.MissingIntroOutro
             or DiagnosticIssue.MissingAudioAnalysis
             or DiagnosticIssue.DuplicateExternalId
+            or DiagnosticIssue.SuspectedDuplicateMedia
             => true,
         _ => false
     };

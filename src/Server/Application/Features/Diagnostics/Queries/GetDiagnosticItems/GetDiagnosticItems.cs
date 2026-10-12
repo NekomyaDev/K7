@@ -266,9 +266,11 @@ public class GetDiagnosticItemsQueryHandler : IRequestHandler<GetDiagnosticItems
         var sourceRequest = request with { PageNumber = 1, PageSize = request.PageNumber * request.PageSize };
         var mediaPage = await GetMediaIssuePageAsync(sourceRequest, cancellationToken);
         var artistPage = await GetMusicArtistIssuePageAsync(sourceRequest, cancellationToken);
-        var totalCount = mediaPage.TotalCount + artistPage.TotalCount;
+        var personPage = await GetPersonDuplicatePageAsync(sourceRequest, cancellationToken);
+        var totalCount = mediaPage.TotalCount + artistPage.TotalCount + personPage.TotalCount;
         var items = mediaPage.Items
             .Concat(artistPage.Items)
+            .Concat(personPage.Items)
             .OrderByDescending(item => item.Severity)
             .ThenBy(item => item.EntityName)
             .ThenBy(item => item.Issues[0])
@@ -781,8 +783,8 @@ public class GetDiagnosticItemsQueryHandler : IRequestHandler<GetDiagnosticItems
                                 f.MediaId == m.Id
                                 && _context.Libraries.Any(l =>
                                     l.Id == f.LibraryId && l.IntroDetectionEnabled))
-                        || duplicateExternalIdMediaIds.Contains(m.Id)
-                        || suspectedDuplicateMediaIds.Contains(m.Id)
+                        || duplicateExternalIdMediaIds.Contains(m.Id) && m.Type != MediaType.MusicArtist
+                        || suspectedDuplicateMediaIds.Contains(m.Id) && m.Type != MediaType.MusicArtist
                         || staleMediaIds.Contains(m.Id))
             .Select(m => m.Id);
 
@@ -873,10 +875,10 @@ public class GetDiagnosticItemsQueryHandler : IRequestHandler<GetDiagnosticItems
         }
 
         if (activeIssues.Contains(DiagnosticIssue.DuplicateExternalId))
-            Add(medias.Where(m => duplicateExternalIdMediaIds.Contains(m.Id)).Select(m => m.Id));
+            Add(medias.Where(m => duplicateExternalIdMediaIds.Contains(m.Id) && m.Type != MediaType.MusicArtist).Select(m => m.Id));
 
         if (activeIssues.Contains(DiagnosticIssue.SuspectedDuplicateMedia))
-            Add(medias.Where(m => suspectedDuplicateMediaIds.Contains(m.Id)).Select(m => m.Id));
+            Add(medias.Where(m => suspectedDuplicateMediaIds.Contains(m.Id) && m.Type != MediaType.MusicArtist).Select(m => m.Id));
 
         return union ?? medias.Where(_ => false).Select(m => m.Id);
     }
@@ -1002,7 +1004,7 @@ public class GetDiagnosticItemsQueryHandler : IRequestHandler<GetDiagnosticItems
 
         var ordered = await _context.Medias
             .AsNoTracking()
-            .Where(m => duplicateIds.Contains(m.Id))
+            .Where(m => duplicateIds.Contains(m.Id) && m.Type != MediaType.MusicArtist)
             .OrderBy(m => m.Title ?? "(untitled)")
             .ThenBy(m => m.Id)
             .Select(m => m.Id)
@@ -1034,7 +1036,7 @@ public class GetDiagnosticItemsQueryHandler : IRequestHandler<GetDiagnosticItems
 
         var ordered = await _context.Medias
             .AsNoTracking()
-            .Where(m => suspectedIds.Contains(m.Id))
+            .Where(m => suspectedIds.Contains(m.Id) && m.Type != MediaType.MusicArtist)
             .OrderBy(m => m.Title ?? "(untitled)")
             .ThenBy(m => m.Id)
             .Select(m => m.Id)
@@ -1171,12 +1173,21 @@ public class GetDiagnosticItemsQueryHandler : IRequestHandler<GetDiagnosticItems
             .DistinctBy(x => x.ArtistId)
             .ToDictionary(x => x.ArtistId, x => x.LibraryId);
 
-        if (request.LibraryId.HasValue)
+        if (request.LibraryId.HasValue && selectedArtistIds is null)
         {
             artists = artists.Where(a => artistToLibrary.GetValueOrDefault(a.Id) == request.LibraryId.Value).ToList();
         }
 
-        var libraryIds = artistToLibrary.Values.Distinct().ToList();
+        var artistIdSet = artists.Select(a => a.Id).ToList();
+        var suspectedArtistIds = await DuplicateMediaDiagnosticHelper.GetSuspectedDuplicateMediaIdsAsync(
+            _context, request.LibraryId, artistIdSet, cancellationToken);
+        var duplicateArtistIds = await DuplicateMediaDiagnosticHelper.GetDuplicateExternalIdArtistIdsAsync(
+            _context, request.LibraryId, cancellationToken);
+
+        var libraryIds = artistToLibrary.Values.Where(id => id != Guid.Empty).Distinct().ToList();
+        if (request.LibraryId is Guid selectedLibraryId && !libraryIds.Contains(selectedLibraryId))
+            libraryIds.Add(selectedLibraryId);
+
         var libraryInfo = await _context.Libraries
             .Where(l => libraryIds.Contains(l.Id))
             .ToDictionaryAsync(l => l.Id, l => l.Title, cancellationToken);
@@ -1186,10 +1197,14 @@ public class GetDiagnosticItemsQueryHandler : IRequestHandler<GetDiagnosticItems
             var issues = new List<DiagnosticIssue>();
             if (!a.HasMembers) issues.Add(DiagnosticIssue.MissingMembers);
             if (a.ReleaseDate is null) issues.Add(DiagnosticIssue.MissingMetadata);
+            if (duplicateArtistIds.Contains(a.Id)) issues.Add(DiagnosticIssue.DuplicateExternalId);
+            if (suspectedArtistIds.Contains(a.Id)) issues.Add(DiagnosticIssue.SuspectedDuplicateMedia);
 
             if (issues.Count == 0) return null;
 
             var libraryId = artistToLibrary.GetValueOrDefault(a.Id);
+            if (libraryId == Guid.Empty && request.LibraryId is Guid fallbackLibraryId)
+                libraryId = fallbackLibraryId;
             var severity = issues.Max(GetIssueSeverity);
 
             return new DiagnosticItemDto
@@ -1215,28 +1230,60 @@ public class GetDiagnosticItemsQueryHandler : IRequestHandler<GetDiagnosticItems
         GetDiagnosticItemsQuery request,
         CancellationToken cancellationToken)
     {
-        if (request.Issue is { } singleIssue
-            && singleIssue is not (DiagnosticIssue.MissingMembers or DiagnosticIssue.MissingMetadata))
-        {
+        if (request.Issue is { } singleIssue && !IsArtistDiagnosticIssue(singleIssue))
             return EmptyPage(request);
-        }
 
-        if (request.Issues is { Count: > 0 }
-            && !request.Issues.Any(i => i is DiagnosticIssue.MissingMembers or DiagnosticIssue.MissingMetadata))
-        {
+        if (request.Issues is { Count: > 0 } && !request.Issues.Any(IsArtistDiagnosticIssue))
             return EmptyPage(request);
-        }
 
-        var artists = _context.Medias.OfType<MusicArtist>()
-            .AsNoTracking()
-            .Where(a => !a.PersonRoles.Any() || a.ReleaseDate == null);
+        var wantMembers = WantsArtistIssue(request, DiagnosticIssue.MissingMembers);
+        var wantMetadata = WantsArtistIssue(request, DiagnosticIssue.MissingMetadata);
+        var wantSuspected = WantsArtistIssue(request, DiagnosticIssue.SuspectedDuplicateMedia);
+        var wantExternalId = WantsArtistIssue(request, DiagnosticIssue.DuplicateExternalId);
+        var suspectedArtistIds = wantSuspected
+            ? (await DuplicateMediaDiagnosticHelper.GetSuspectedDuplicateMediaIdsAsync(
+                _context, request.LibraryId, limitToMediaIds: null, cancellationToken)).ToList()
+            : [];
+        var duplicateArtistIds = wantExternalId
+            ? (await DuplicateMediaDiagnosticHelper.GetDuplicateExternalIdArtistIdsAsync(
+                _context, request.LibraryId, cancellationToken)).ToList()
+            : [];
 
+        var allArtists = _context.Medias.OfType<MusicArtist>().AsNoTracking();
+        IQueryable<MusicArtist>? matched = null;
+        void AddMatched(IQueryable<MusicArtist> next) => matched = matched is null ? next : matched.Union(next);
+
+        if (wantMembers)
+            AddMatched(allArtists.Where(a => !a.PersonRoles.Any()));
+        if (wantMetadata)
+            AddMatched(allArtists.Where(a => a.ReleaseDate == null));
+        if (suspectedArtistIds.Count > 0)
+            AddMatched(allArtists.Where(a => suspectedArtistIds.Contains(a.Id)));
+        if (duplicateArtistIds.Count > 0)
+            AddMatched(allArtists.Where(a => duplicateArtistIds.Contains(a.Id)));
+
+        if (matched is null)
+            return EmptyPage(request);
+
+        var artists = matched;
         if (request.LibraryId.HasValue)
         {
-            artists = artists.Where(a => _context.Medias.OfType<MusicAlbum>()
+            var libraryId = request.LibraryId.Value;
+            IQueryable<MusicArtist>? inLibrary = null;
+            void AddInLibrary(IQueryable<MusicArtist> next) =>
+                inLibrary = inLibrary is null ? next : inLibrary.Union(next);
+
+            if (suspectedArtistIds.Count > 0)
+                AddInLibrary(allArtists.Where(a => suspectedArtistIds.Contains(a.Id)));
+            if (duplicateArtistIds.Count > 0)
+                AddInLibrary(allArtists.Where(a => duplicateArtistIds.Contains(a.Id)));
+
+            AddInLibrary(allArtists.Where(a => _context.Medias.OfType<MusicAlbum>()
                 .Where(album => album.ArtistId == a.Id)
                 .Join(_context.IndexedFiles, album => album.Id, file => file.MediaId, (_, file) => file.LibraryId)
-                .Any(libraryId => libraryId == request.LibraryId.Value));
+                .Any(id => id == libraryId)));
+
+            artists = artists.Join(inLibrary!, a => a.Id, b => b.Id, (a, _) => a);
         }
 
         var orderedArtists = artists
@@ -1259,6 +1306,96 @@ public class GetDiagnosticItemsQueryHandler : IRequestHandler<GetDiagnosticItems
             .ThenBy(item => item.Issues[0])
             .ToList();
         return new PaginatedList<DiagnosticItemDto>(pageItems, totalCount, request.PageNumber, request.PageSize);
+    }
+
+    private static bool IsArtistDiagnosticIssue(DiagnosticIssue issue) =>
+        issue is DiagnosticIssue.MissingMembers
+            or DiagnosticIssue.MissingMetadata
+            or DiagnosticIssue.SuspectedDuplicateMedia
+            or DiagnosticIssue.DuplicateExternalId;
+
+    private static bool WantsArtistIssue(GetDiagnosticItemsQuery request, DiagnosticIssue issue)
+    {
+        if (request.Issue is null && request.Issues is not { Count: > 0 })
+            return true;
+
+        var singleOk = request.Issue is null
+            || DiagnosticIssueTaxonomy.Canonicalize(request.Issue.Value) == issue;
+        var listOk = request.Issues is not { Count: > 0 }
+            || request.Issues.Select(DiagnosticIssueTaxonomy.Canonicalize).Contains(issue);
+        return singleOk && listOk;
+    }
+
+    private async Task<PaginatedList<DiagnosticItemDto>> GetPersonDuplicatePageAsync(
+        GetDiagnosticItemsQuery request,
+        CancellationToken cancellationToken)
+    {
+        var wantSuspected = WantsArtistIssue(request, DiagnosticIssue.SuspectedDuplicateMedia);
+        var wantExternalId = WantsArtistIssue(request, DiagnosticIssue.DuplicateExternalId);
+        if (!wantSuspected && !wantExternalId)
+            return EmptyPage(request);
+
+        var suspectedIds = wantSuspected
+            ? await DuplicateMediaDiagnosticHelper.GetSuspectedDuplicatePersonIdsAsync(
+                _context, request.LibraryId, cancellationToken)
+            : [];
+        var duplicateIds = wantExternalId
+            ? await DuplicateMediaDiagnosticHelper.GetDuplicateExternalIdPersonIdsAsync(
+                _context, request.LibraryId, cancellationToken)
+            : [];
+
+        var ids = suspectedIds.Union(duplicateIds).ToList();
+        if (ids.Count == 0)
+            return EmptyPage(request);
+
+        var ordered = await _context.Persons
+            .AsNoTracking()
+            .Where(p => ids.Contains(p.Id))
+            .OrderBy(p => p.Name)
+            .ThenBy(p => p.Id)
+            .Select(p => new { p.Id, p.Name })
+            .ToListAsync(cancellationToken);
+
+        var totalCount = ordered.Count;
+        var page = ordered
+            .Skip((request.PageNumber - 1) * request.PageSize)
+            .Take(request.PageSize)
+            .ToList();
+
+        if (page.Count == 0)
+            return new PaginatedList<DiagnosticItemDto>([], totalCount, request.PageNumber, request.PageSize);
+
+        var libraryId = request.LibraryId ?? Guid.Empty;
+        var libraryTitle = request.LibraryId is Guid selectedLibraryId
+            ? await _context.Libraries
+                .Where(l => l.Id == selectedLibraryId)
+                .Select(l => l.Title)
+                .FirstOrDefaultAsync(cancellationToken) ?? ""
+            : "";
+
+        var items = page.Select(person =>
+        {
+            var issues = new List<DiagnosticIssue>();
+            if (duplicateIds.Contains(person.Id))
+                issues.Add(DiagnosticIssue.DuplicateExternalId);
+            if (suspectedIds.Contains(person.Id))
+                issues.Add(DiagnosticIssue.SuspectedDuplicateMedia);
+
+            return new DiagnosticItemDto
+            {
+                EntityId = person.Id,
+                EntityName = person.Name,
+                EntityType = DiagnosticEntityType.Person,
+                LibraryId = libraryId,
+                LibraryTitle = libraryTitle,
+                Issues = issues,
+                Severity = issues.Max(GetIssueSeverity),
+                MediaUrl = $"/persons/{person.Id}"
+            };
+        }).ToList();
+
+        items = ApplyIssueFilters(items, request);
+        return new PaginatedList<DiagnosticItemDto>(items, totalCount, request.PageNumber, request.PageSize);
     }
 
     private async Task<List<DiagnosticItemDto>> GetScanIssuesAsync(GetDiagnosticItemsQuery request, CancellationToken cancellationToken)

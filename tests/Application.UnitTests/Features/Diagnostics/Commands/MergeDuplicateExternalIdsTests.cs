@@ -2,6 +2,8 @@ using K7.Server.Application.Features.Diagnostics.Commands.MergeDuplicateExternal
 using K7.Server.Application.Helpers;
 using K7.Server.Domain.Entities;
 using K7.Server.Domain.Entities.Medias;
+using K7.Server.Domain.Entities.Metadatas;
+using K7.Server.Domain.Entities.Metadatas.PersonRoles;
 using K7.Server.Domain.Enums;
 using K7.Server.Infrastructure.Database.Context.Data;
 using Microsoft.Data.Sqlite;
@@ -249,6 +251,164 @@ public class MergeDuplicateExternalIdsTests
         merged.Should().Be(1);
         (await _context.Medias.OfType<Movie>().AnyAsync(m => m.Id == localDuplicate.Id)).Should().BeFalse();
         (await _context.Medias.OfType<Movie>().AnyAsync(m => m.Id == otherDuplicate.Id)).Should().BeTrue();
+    }
+
+    [Test]
+    public async Task Handle_ShouldMergeArtistsThatShareANormalizedName()
+    {
+        var kept = new MusicArtist { Id = Guid.NewGuid(), Title = "Daft Punk" };
+        var duplicate = new MusicArtist { Id = Guid.NewGuid(), Title = "daft punk" };
+        var keptAlbum = new MusicAlbum { Id = Guid.NewGuid(), Title = "Homework", ArtistId = kept.Id };
+        var extraAlbum = new MusicAlbum { Id = Guid.NewGuid(), Title = "Discovery", ArtistId = kept.Id };
+        var movedAlbum = new MusicAlbum { Id = Guid.NewGuid(), Title = "Random Access Memories", ArtistId = duplicate.Id };
+        _context.Medias.AddRange(kept, duplicate, keptAlbum, extraAlbum, movedAlbum);
+        await _context.SaveChangesAsync();
+
+        var merged = await _handler.Handle(
+            new MergeDuplicateExternalIdsCommand { Scope = DuplicateMergeScope.NamedArtistsAndPersons },
+            CancellationToken.None);
+
+        merged.Should().Be(1);
+        (await _context.Medias.OfType<MusicArtist>().AnyAsync(a => a.Id == duplicate.Id)).Should().BeFalse();
+        (await _context.Medias.OfType<MusicAlbum>().SingleAsync(a => a.Id == movedAlbum.Id)).ArtistId.Should().Be(kept.Id);
+    }
+
+    [Test]
+    public async Task Handle_ShouldMergePersonsThatShareANormalizedName_AndMoveRoles()
+    {
+        var band = new MusicArtist { Id = Guid.NewGuid(), Title = "Band" };
+        var other = new MusicArtist { Id = Guid.NewGuid(), Title = "Other" };
+        var kept = new Person { Id = Guid.NewGuid(), Name = "Ada Lovelace", Biography = "Mathematician" };
+        var duplicate = new Person { Id = Guid.NewGuid(), Name = "ada lovelace" };
+        var keptRole = new MusicArtistMember
+        {
+            Id = Guid.NewGuid(),
+            PersonId = kept.Id,
+            MediaId = band.Id
+        };
+        var movedRole = new MusicArtistMember
+        {
+            Id = Guid.NewGuid(),
+            PersonId = duplicate.Id,
+            MediaId = other.Id
+        };
+        _context.Medias.AddRange(band, other);
+        _context.Persons.AddRange(kept, duplicate);
+        _context.PersonRoles.AddRange(keptRole, movedRole);
+        await _context.SaveChangesAsync();
+
+        var merged = await _handler.Handle(
+            new MergeDuplicateExternalIdsCommand { Scope = DuplicateMergeScope.NamedArtistsAndPersons },
+            CancellationToken.None);
+
+        merged.Should().Be(1);
+        (await _context.Persons.AnyAsync(p => p.Id == duplicate.Id)).Should().BeFalse();
+        var roles = await _context.PersonRoles.ToListAsync();
+        roles.Should().OnlyContain(r => r.PersonId == kept.Id);
+        roles.Select(r => r.MediaId).Should().BeEquivalentTo([band.Id, other.Id]);
+    }
+
+    [Test]
+    public async Task Handle_ShouldMergePersonsThatShareAnExternalId()
+    {
+        var band = new MusicArtist { Id = Guid.NewGuid(), Title = "Band" };
+        var other = new MusicArtist { Id = Guid.NewGuid(), Title = "Other" };
+        var kept = new Person { Id = Guid.NewGuid(), Name = "Ada", Biography = "Mathematician" };
+        var duplicate = new Person { Id = Guid.NewGuid(), Name = "Augusta" };
+        var keptRole = new MusicArtistMember
+        {
+            Id = Guid.NewGuid(),
+            PersonId = kept.Id,
+            MediaId = band.Id
+        };
+        var movedRole = new MusicArtistMember
+        {
+            Id = Guid.NewGuid(),
+            PersonId = duplicate.Id,
+            MediaId = other.Id
+        };
+        _context.Medias.AddRange(band, other);
+        _context.Persons.AddRange(kept, duplicate);
+        _context.PersonRoles.AddRange(keptRole, movedRole);
+        _context.ExternalIds.AddRange(
+            new ExternalId { Id = Guid.NewGuid(), ProviderName = "tmdb", Value = "123", PersonId = kept.Id },
+            new ExternalId { Id = Guid.NewGuid(), ProviderName = "tmdb", Value = "123", PersonId = duplicate.Id });
+        await _context.SaveChangesAsync();
+
+        var merged = await _handler.Handle(new MergeDuplicateExternalIdsCommand(), CancellationToken.None);
+
+        merged.Should().Be(1);
+        (await _context.Persons.AnyAsync(p => p.Id == duplicate.Id)).Should().BeFalse();
+        var roles = await _context.PersonRoles.ToListAsync();
+        roles.Should().OnlyContain(r => r.PersonId == kept.Id);
+        roles.Select(r => r.MediaId).Should().BeEquivalentTo([band.Id, other.Id]);
+    }
+
+    [Test]
+    public async Task Handle_ShouldReattachPersonRoles_WhenMergingArtists()
+    {
+        var kept = new MusicArtist
+        {
+            Id = Guid.NewGuid(),
+            Title = "Daft Punk",
+            Biography = "French duo",
+            Country = "FR"
+        };
+        var duplicate = new MusicArtist { Id = Guid.NewGuid(), Title = "Daft Punk" };
+        var album = new MusicAlbum { Id = Guid.NewGuid(), Title = "Homework", ArtistId = duplicate.Id };
+        var member = new Person { Id = Guid.NewGuid(), Name = "Thomas Bangalter" };
+        var role = new MusicArtistMember
+        {
+            Id = Guid.NewGuid(),
+            PersonId = member.Id,
+            MediaId = duplicate.Id,
+            Role = "member"
+        };
+        _context.Medias.AddRange(kept, duplicate, album);
+        _context.Persons.Add(member);
+        _context.PersonRoles.Add(role);
+        AddExternalId(kept.Id, "musicbrainz", "artist-1");
+        AddExternalId(duplicate.Id, "musicbrainz", "artist-1");
+        await _context.SaveChangesAsync();
+
+        var merged = await _handler.Handle(new MergeDuplicateExternalIdsCommand(), CancellationToken.None);
+
+        merged.Should().Be(1);
+        (await _context.Medias.OfType<MusicArtist>().AnyAsync(a => a.Id == duplicate.Id)).Should().BeFalse();
+        (await _context.Medias.OfType<MusicAlbum>().SingleAsync(a => a.Id == album.Id)).ArtistId.Should().Be(kept.Id);
+        var moved = await _context.PersonRoles.SingleAsync();
+        moved.PersonId.Should().Be(member.Id);
+        moved.MediaId.Should().Be(kept.Id);
+    }
+
+    [Test]
+    public async Task Handle_ShouldReattachPersonRoles_WhenMergingMovies()
+    {
+        var kept = new Movie { Id = Guid.NewGuid(), Title = "Arrival" };
+        var duplicate = new Movie { Id = Guid.NewGuid(), Title = "Arrival" };
+        var person = new Person { Id = Guid.NewGuid(), Name = "Amy Adams" };
+        var role = new Actor
+        {
+            Id = Guid.NewGuid(),
+            PersonId = person.Id,
+            MediaId = duplicate.Id,
+            CharacterName = "Louise"
+        };
+        _context.Medias.AddRange(kept, duplicate);
+        _context.Persons.Add(person);
+        _context.PersonRoles.Add(role);
+        AddFile(kept.Id, "/kept/arrival.mkv");
+        AddExternalId(kept.Id, "tmdb", "329865");
+        AddExternalId(duplicate.Id, "tmdb", "329865");
+        await _context.SaveChangesAsync();
+
+        var merged = await _handler.Handle(new MergeDuplicateExternalIdsCommand(), CancellationToken.None);
+
+        merged.Should().Be(1);
+        (await _context.Medias.OfType<Movie>().AnyAsync(m => m.Id == duplicate.Id)).Should().BeFalse();
+        var moved = await _context.PersonRoles.SingleAsync();
+        moved.PersonId.Should().Be(person.Id);
+        moved.MediaId.Should().Be(kept.Id);
     }
 
     private Guid AddSerie(string title)

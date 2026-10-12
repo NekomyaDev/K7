@@ -1,11 +1,13 @@
 using FluentValidation.Results;
 using K7.Server.Application.Common.Exceptions;
 using K7.Server.Application.Common.Security;
+using K7.Server.Application.Features.BackgroundTasks.Commands.CreateBackgroundTask;
 using K7.Server.Application.Features.BackgroundTasks.Commands.CreateBackgroundTasksBatch;
 using K7.Server.Application.Features.Diagnostics.Commands.FixDiagnosticItems;
 using K7.Server.Application.Features.Diagnostics.Commands.MergeDuplicateExternalIds;
 using K7.Server.Application.Features.Diagnostics.Services;
 using K7.Server.Domain.Constants;
+using K7.Server.Domain.Entities;
 using K7.Server.Domain.Enums;
 using Microsoft.Extensions.Logging;
 using ValidationException = K7.Server.Application.Common.Exceptions.ValidationException;
@@ -37,17 +39,34 @@ public class QueueDiagnosticFixesCommandHandler(
                 new ValidationFailure(nameof(request.Issue), $"Issue {request.Issue} does not support automated fixes.")
             ]);
 
-        if (action == DiagnosticFixAction.MergeDuplicateExternalIds)
+        if (action is DiagnosticFixAction.MergeDuplicateExternalIds or DiagnosticFixAction.MergeNamedDuplicates)
         {
-            var merged = await sender.Send(
-                new MergeDuplicateExternalIdsCommand { LibraryId = request.LibraryId },
-                cancellationToken);
+            var scope = action == DiagnosticFixAction.MergeNamedDuplicates
+                ? DuplicateMergeScope.NamedArtistsAndPersons
+                : DuplicateMergeScope.ExternalIds;
+
+            await sender.Send(new CreateBackgroundTaskCommand
+            {
+                Request = new MergeDuplicateExternalIdsCommand
+                {
+                    LibraryId = request.LibraryId,
+                    Scope = scope
+                },
+                TargetEntityId = MergeDuplicateExternalIdsCommandHandler.ResolveMergeTargetEntityId(
+                    request.LibraryId, scope),
+                TargetEntityTypeName = request.LibraryId is null ? null : nameof(Library),
+                Lane = BackgroundTaskLane.MediaAnalysis,
+                WorkClass = BackgroundTaskWorkClass.Polish,
+                TriggeredBy = BackgroundTaskTriggeredBy.Diagnostics,
+                MaxAttempts = 1,
+                TimeoutSeconds = 3600
+            }, cancellationToken);
 
             logger.LogInformation(
-                "Merged {MergedCount} duplicate medias for issue {Issue} (library: {LibraryId})",
-                merged, request.Issue, request.LibraryId);
+                "Queued duplicate merge for issue {Issue} (library: {LibraryId}, scope: {Scope})",
+                request.Issue, request.LibraryId, scope);
 
-            return merged;
+            return 1;
         }
 
         var entityIds = await entityResolver.ResolveEntityIdsAsync(request.Issue, request.LibraryId, cancellationToken);

@@ -2,6 +2,7 @@ using K7.Server.Application.Common.Interfaces;
 using K7.Server.Application.Common.Security;
 using K7.Server.Application.Features.BackgroundTasks.Commands.CreateBackgroundTask;
 using K7.Server.Application.Features.BackgroundTasks.Commands.CreateBackgroundTasksBatch;
+using K7.Server.Application.Features.Diagnostics.Commands.MergeDuplicateExternalIds;
 using K7.Server.Application.Features.Diagnostics.Services;
 using K7.Server.Application.Features.IndexedFiles.Commands.ComputeHlsSegments;
 using K7.Server.Application.Features.IndexedFiles.Commands.CreateFileMetadatas;
@@ -35,6 +36,32 @@ public class FixDiagnosticItemsCommandHandler(
 {
     public async Task<int> Handle(FixDiagnosticItemsCommand request, CancellationToken cancellationToken)
     {
+        if (request.Action is DiagnosticFixAction.MergeDuplicateExternalIds
+            or DiagnosticFixAction.MergeNamedDuplicates)
+        {
+            var scope = request.Action == DiagnosticFixAction.MergeNamedDuplicates
+                ? DuplicateMergeScope.NamedArtistsAndPersons
+                : DuplicateMergeScope.ExternalIds;
+
+            await sender.Send(new CreateBackgroundTaskCommand
+            {
+                Request = new MergeDuplicateExternalIdsCommand
+                {
+                    Scope = scope,
+                    LimitToIds = request.EntityIds
+                },
+                TargetEntityId = MergeDuplicateExternalIdsCommandHandler.ResolveMergeTargetEntityId(
+                    libraryId: null, scope, request.EntityIds),
+                Lane = BackgroundTaskLane.MediaAnalysis,
+                WorkClass = BackgroundTaskWorkClass.Polish,
+                TriggeredBy = BackgroundTaskTriggeredBy.Diagnostics,
+                MaxAttempts = 1,
+                TimeoutSeconds = 3600
+            }, cancellationToken);
+
+            return 1;
+        }
+
         if (request.Action == DiagnosticFixAction.RetryCreateMedia)
         {
             var items = await orphanIndexedFileFixBuilder.BuildCreateMediaTasksAsync(request.EntityIds, cancellationToken);
@@ -100,7 +127,8 @@ public class FixDiagnosticItemsCommandHandler(
                         break;
 
                     case DiagnosticFixAction.MergeDuplicateExternalIds:
-                        throw new InvalidOperationException("Duplicate external id merge is not applied per entity.");
+                    case DiagnosticFixAction.MergeNamedDuplicates:
+                        throw new InvalidOperationException("Duplicate merge is not applied per entity inside the loop.");
 
                     case DiagnosticFixAction.AnalyzeMusicTrackAudio:
                         await sender.Send(new CreateBackgroundTaskCommand
