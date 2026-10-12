@@ -74,6 +74,8 @@ public class GetMediaQueryHandler(
             .Include(x => (x as MusicAlbum)!.Tracks)
                 .ThenInclude(t => t.ArtistCredits)
                     .ThenInclude(c => c.MusicArtist)
+            .Include(x => (x as MusicAlbum)!.Tracks)
+                .ThenInclude(t => t.Ratings)
             .Include(x => (x as MusicAlbum)!.Artist)
             .Include(x => (x as MusicTrack)!.AudioAnalysis)
             .Include(x => (x as MusicTrack)!.Artist)
@@ -119,6 +121,8 @@ public class GetMediaQueryHandler(
             .Include(x => (x as MusicArtist)!.Albums)
                 .ThenInclude(a => a.Pictures)
                     .ThenInclude(p => p.Variants)
+            .Include(x => (x as MusicArtist)!.Albums)
+                .ThenInclude(a => a.Ratings)
             .AsQueryable();
 
         if (userId.HasValue)

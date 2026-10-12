@@ -143,6 +143,7 @@ public partial class MusicAlbumDetail : IDisposable
                         CoverDominantColor = _coverDominantColor,
                         Duration = t.Duration ?? 0,
                         DiscNumber = 1,
+                        UserRating = t.UserRating,
                         LoudnessLufs = t.LoudnessLufs,
                         FadeInDuration = t.FadeInDuration,
                         FadeOutDuration = t.FadeOutDuration,

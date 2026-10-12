@@ -106,20 +106,7 @@ public partial class MusicArtistDetail : IDisposable
                 var pictureCacheVersion = DateTimeOffset.UtcNow;
                 _albums = (artist.Albums ?? [])
                     .OrderByDescending(a => a.ReleaseDate)
-                    .Select(album => new MediaCardViewModel
-                    {
-                        Id = album.Id.ToString(),
-                        Kind = MediaCardKind.Cover,
-                        MediaType = MediaType.MusicAlbum,
-                        Title = album.Title,
-                        AdditionalInformations = album.ReleaseDate?.Year.ToString(),
-                        PictureUrl = MediaPictureUrlHelper.WithCacheBuster(
-                            apiClient.GetAbsoluteUri(
-                                (album.Pictures?.FirstOrDefault(p => p.Type == MetadataPictureType.Cover)
-                                    ?? album.Pictures?.FirstOrDefault(p => p.Type == MetadataPictureType.Poster))?
-                                    .GetUri(MetadataPictureSize.Medium)?.OriginalString)?.AbsoluteUri,
-                            pictureCacheVersion)
-                    })
+                    .Select(album => MapAlbumCard(album, pictureCacheVersion))
                     .ToList();
 
                 StateHasChanged();
@@ -131,18 +118,7 @@ public partial class MusicArtistDetail : IDisposable
                 .ToList();
 
             _albums = albums
-                .Select(album => new MediaCardViewModel
-                {
-                    Id = album.Id.ToString(),
-                    Kind = MediaCardKind.Cover,
-                    MediaType = MediaType.MusicAlbum,
-                    Title = album.Title,
-                    AdditionalInformations = album.ReleaseDate?.Year.ToString(),
-                    PictureUrl = apiClient.GetAbsoluteUri(
-                        (album.Pictures?.FirstOrDefault(p => p.Type == MetadataPictureType.Cover)
-                            ?? album.Pictures?.FirstOrDefault(p => p.Type == MetadataPictureType.Poster))?
-                            .GetUri(MetadataPictureSize.Medium)?.OriginalString)?.AbsoluteUri
-                })
+                .Select(album => MapAlbumCard(album))
                 .ToList();
 
             var topTracks = await k7ServerService.GetArtistTopTracksAsync(Guid.Parse(Id));
@@ -246,6 +222,27 @@ public partial class MusicArtistDetail : IDisposable
                         _artist.Id))));
     }
 
+    private MediaCardViewModel MapAlbumCard(MusicAlbumDto album, DateTimeOffset? pictureCacheVersion = null)
+    {
+        var coverUri = apiClient.GetAbsoluteUri(
+            (album.Pictures?.FirstOrDefault(p => p.Type == MetadataPictureType.Cover)
+                ?? album.Pictures?.FirstOrDefault(p => p.Type == MetadataPictureType.Poster))?
+                .GetUri(MetadataPictureSize.Medium)?.OriginalString)?.AbsoluteUri;
+
+        return new MediaCardViewModel
+        {
+            Id = album.Id.ToString(),
+            Kind = MediaCardKind.Cover,
+            MediaType = MediaType.MusicAlbum,
+            Title = album.Title,
+            AdditionalInformations = album.ReleaseDate?.Year.ToString(),
+            PictureUrl = pictureCacheVersion is null
+                ? coverUri
+                : MediaPictureUrlHelper.WithCacheBuster(coverUri, pictureCacheVersion),
+            UserRating = GetUserRating(album.Ratings)
+        };
+    }
+
     private MediaCardViewModel MapArtistCard(LiteMusicArtistDto artist) => new()
     {
         Id = artist.Id.ToString(),
@@ -258,7 +255,8 @@ public partial class MusicArtistDetail : IDisposable
         PictureUrl = apiClient.GetAbsoluteUri(
             (artist.Pictures?.FirstOrDefault(p => p.Type == MetadataPictureType.Poster)
                 ?? artist.Pictures?.FirstOrDefault(p => p.Type == MetadataPictureType.Cover))?
-                .GetUri(MetadataPictureSize.Small)?.OriginalString)?.AbsoluteUri
+                .GetUri(MetadataPictureSize.Small)?.OriginalString)?.AbsoluteUri,
+        UserRating = artist.UserRating
     };
 
     private List<TrackViewModel> MapTracks(IEnumerable<LiteMusicTrackDto> tracks) =>

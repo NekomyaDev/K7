@@ -3,8 +3,11 @@ using K7.Server.Application.Common.Mappings;
 using K7.Server.Application.Features.Medias.Queries.GetMedia;
 using K7.Server.Application.Services;
 using K7.Server.Domain.Entities.Medias;
+using K7.Server.Domain.Entities.Ratings;
 using K7.Server.Domain.Entities.Users;
 using K7.Server.Infrastructure.Database.Context.Data;
+using K7.Server.Domain.Enums;
+using K7.Shared.Dtos.Entities;
 using K7.Shared.Dtos.Entities.Medias;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -143,4 +146,89 @@ public class GetMediaQueryHandlerTests
         var loaded = (SerieSeason)result.Media;
         loaded.Episodes.Select(e => e.Id).Should().Equal(keptId);
     }
+
+    [Test]
+    public async Task Handle_ShouldMapTrackUserRating_WhenLoadingAlbum()
+    {
+        var albumId = Guid.NewGuid();
+        var trackId = Guid.NewGuid();
+        var album = new MusicAlbum
+        {
+            Id = albumId,
+            Title = "Album",
+            SortTitle = "Album"
+        };
+        var track = new MusicTrack
+        {
+            Id = trackId,
+            AlbumId = albumId,
+            Album = album,
+            Title = "Track",
+            SortTitle = "Track",
+            TrackNumber = 1,
+            DiscNumber = 1
+        };
+        album.Tracks.Add(track);
+        _context.Medias.AddRange(album, track);
+        _context.Ratings.Add(new UserRating
+        {
+            Id = Guid.NewGuid(),
+            UserId = _userId,
+            MediaId = trackId,
+            Value = 8,
+            MinimumValue = 0,
+            MaximumValue = 10
+        });
+        await _context.SaveChangesAsync();
+
+        var result = await _handler.Handle(new GetMediaQuery(albumId), CancellationToken.None);
+        var dto = (MusicAlbumDto)result.Media.ToMediaDto(result.ItemBookmarks);
+
+        dto.Tracks.Should().ContainSingle();
+        dto.Tracks![0].UserRating.Should().Be(8);
+    }
+
+    [Test]
+    public async Task Handle_ShouldMapAlbumUserRatings_WhenLoadingArtist()
+    {
+        var artistId = Guid.NewGuid();
+        var albumId = Guid.NewGuid();
+        var artist = new MusicArtist
+        {
+            Id = artistId,
+            Title = "Artist",
+            SortTitle = "Artist"
+        };
+        var album = new MusicAlbum
+        {
+            Id = albumId,
+            Title = "Album",
+            SortTitle = "Album",
+            ArtistId = artistId,
+            Artist = artist
+        };
+        artist.Albums.Add(album);
+        _context.Medias.AddRange(artist, album);
+        _context.Ratings.Add(new UserRating
+        {
+            Id = Guid.NewGuid(),
+            UserId = _userId,
+            MediaId = albumId,
+            Value = 7,
+            MinimumValue = 0,
+            MaximumValue = 10
+        });
+        await _context.SaveChangesAsync();
+
+        var result = await _handler.Handle(new GetMediaQuery(artistId), CancellationToken.None);
+        var dto = (MusicArtistDto)result.Media.ToMediaDto(result.ItemBookmarks);
+
+        dto.Albums.Should().ContainSingle();
+        GetUserRating(dto.Albums![0].Ratings).Should().Be(7);
+    }
+
+    private static int? GetUserRating(IReadOnlyList<RatingDto>? ratings) =>
+        ratings?.FirstOrDefault(r => r.Source == RatingSource.LocalUser)?.Value is double value
+            ? (int)value
+            : null;
 }

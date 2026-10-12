@@ -64,6 +64,7 @@ public class GetSimilarMediaQueryHandler(IApplicationDbContext context)
             .IncludeMetadataTagsForMapping()
             .Include(m => m.Pictures)
                 .ThenInclude(p => p.Variants)
+            .Include(m => m.Ratings)
             .Include(m => m.UserMediaStates)
             .AsSplitQuery()
             .ToListAsync(cancellationToken);

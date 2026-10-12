@@ -344,6 +344,7 @@ public partial class SerieSeason : IAsyncDisposable
             PictureUrl = GetEpisodeStillUrl(episode),
             Progress = progress,
             Watched = watched,
+            UserRating = episode.UserRating,
         };
         _episodeCardModels[episode.Id] = model;
         return model;
