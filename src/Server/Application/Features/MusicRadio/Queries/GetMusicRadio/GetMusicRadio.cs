@@ -32,6 +32,7 @@ public class GetMusicRadioQueryHandler(
     private const int DiscoveryAiSeedCount = 5;
     private const int DiscoveryAiMinSimilarPerSeed = 40;
     private const int DiscoveryAiFingerprintMinCount = 80;
+    private const int ArtistRadioSimilarArtistCount = 8;
     private const double FavoriteRatingThreshold = 5;
 
     public async Task<List<BaseMedia>> Handle(GetMusicRadioQuery request, CancellationToken cancellationToken)
@@ -83,45 +84,207 @@ public class GetMusicRadioQueryHandler(
         if (request.SeedArtistId is not { } artistId)
             return [];
 
-        var artistGenresQuery = context.Medias
-            .OfType<MusicTrack>()
-            .Where(t => t.PersonRoles.Any(r => r.PersonId == artistId)
-                     || t.Album.PersonRoles.Any(r => r.PersonId == artistId));
+        var playable = ApplyExcludeIdsFilter(BuildLightTrackIdQuery(userId, libraryIds), request.ExcludeIds);
+        var artistTrackIds = await WhereLinkedToMusicArtist(playable, artistId)
+            .OrderBy(_ => EF.Functions.Random())
+            .Select(t => t.Id)
+            .Take(request.Limit)
+            .ToListAsync(ct);
 
-        artistGenresQuery = ApplyLibraryFilter(artistGenresQuery, libraryIds);
+        if (artistTrackIds.Count == 0 && request.ExcludeIds is not { Length: > 0 })
+            return [];
 
-        var artistGenres = await artistGenresQuery
+        var similarIds = await GetSimilarArtistTrackIdsAsync(playable, artistId, request.Limit, ct);
+        var similarSlots = artistTrackIds.Count == 0
+            ? request.Limit
+            : request.Limit - Math.Min(artistTrackIds.Count, Math.Max(1, request.Limit / 3));
+        if (similarIds.Count < similarSlots)
+        {
+            var genreIds = await GetGenreNeighborTrackIdsAsync(
+                playable,
+                WhereLinkedToMusicArtist(BuildLightTrackIdQuery(userId, libraryIds), artistId),
+                artistId,
+                similarIds,
+                request.Limit - similarIds.Count,
+                ct);
+            if (genreIds.Count > 0)
+                similarIds = similarIds.Concat(genreIds).ToList();
+        }
+
+        if (artistTrackIds.Count == 0 && similarIds.Count == 0)
+            return [];
+
+        var selectedIds = InterleaveArtistRadio(artistTrackIds, similarIds, request.Limit);
+        return await LoadTracksByIdsAsync(selectedIds, userId, libraryIds, ct);
+    }
+
+    private async Task<List<Guid>> GetSimilarArtistTrackIdsAsync(
+        IQueryable<MusicTrack> playable,
+        Guid artistId,
+        int limit,
+        CancellationToken ct)
+    {
+        if (limit <= 0)
+            return [];
+
+        var similarArtistIds = await ResolveSimilarArtistIdsAsync(artistId, ct);
+        if (similarArtistIds.Count == 0)
+            return [];
+
+        return await WhereNotLinkedToMusicArtist(
+                WhereLinkedToAnyMusicArtist(playable, similarArtistIds),
+                artistId)
+            .OrderBy(_ => EF.Functions.Random())
+            .Select(t => t.Id)
+            .Take(limit)
+            .ToListAsync(ct);
+    }
+
+    private async Task<List<Guid>> ResolveSimilarArtistIdsAsync(Guid artistId, CancellationToken ct)
+    {
+        if (!await musicIntelligenceService.IsEnabledAsync(ct))
+            return [];
+
+        var artistName = await context.Medias
+            .OfType<MusicArtist>()
+            .AsNoTracking()
+            .Where(a => a.Id == artistId)
+            .Select(a => a.Title)
+            .FirstOrDefaultAsync(ct);
+
+        var matches = await musicIntelligenceService.GetSimilarArtistsAsync(
+            artistId,
+            artistName,
+            ArtistRadioSimilarArtistCount,
+            ct);
+        if (matches is not { Count: > 0 })
+            return [];
+
+        var parsedIds = new List<Guid>();
+        foreach (var match in matches)
+        {
+            if (Guid.TryParse(match.ArtistId, out var id) && id != artistId)
+                parsedIds.Add(id);
+        }
+
+        var knownIds = parsedIds.Count == 0
+            ? []
+            : await context.Medias
+                .OfType<MusicArtist>()
+                .AsNoTracking()
+                .Where(a => parsedIds.Contains(a.Id))
+                .Select(a => a.Id)
+                .ToListAsync(ct);
+        var known = knownIds.ToHashSet();
+
+        var unresolvedNames = matches
+            .Where(m => !Guid.TryParse(m.ArtistId, out var id) || !known.Contains(id))
+            .Select(m => m.Artist)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Select(name => name!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var byName = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+        if (unresolvedNames.Count > 0)
+        {
+            var lowered = unresolvedNames.Select(n => n.ToLowerInvariant()).ToHashSet();
+            var named = await context.Medias
+                .OfType<MusicArtist>()
+                .AsNoTracking()
+                .Where(a => a.Id != artistId && a.Title != null && lowered.Contains(a.Title.ToLower()))
+                .Select(a => new { a.Id, a.Title })
+                .ToListAsync(ct);
+            foreach (var artist in named)
+            {
+                if (artist.Title is not null)
+                    byName.TryAdd(artist.Title, artist.Id);
+            }
+        }
+
+        var ordered = new List<Guid>();
+        var seen = new HashSet<Guid>();
+        foreach (var match in matches)
+        {
+            Guid? resolved = null;
+            if (Guid.TryParse(match.ArtistId, out var id) && known.Contains(id))
+                resolved = id;
+            else if (!string.IsNullOrWhiteSpace(match.Artist) && byName.TryGetValue(match.Artist, out var namedId))
+                resolved = namedId;
+
+            if (resolved is { } resolvedId && resolvedId != artistId && seen.Add(resolvedId))
+                ordered.Add(resolvedId);
+        }
+
+        return ordered;
+    }
+
+    private async Task<List<Guid>> GetGenreNeighborTrackIdsAsync(
+        IQueryable<MusicTrack> playable,
+        IQueryable<MusicTrack> artistTracks,
+        Guid artistId,
+        IReadOnlyList<Guid> excludeIds,
+        int take,
+        CancellationToken ct)
+    {
+        if (take <= 0)
+            return [];
+
+        var trackGenres = await artistTracks
             .SelectMany(t => t.MetadataTags
                 .Where(mt => mt.MetadataTag.Kind == MetadataTagKind.Genre)
                 .Select(mt => mt.MetadataTag.DisplayName))
             .Distinct()
             .ToListAsync(ct);
+        var albumGenres = await artistTracks
+            .SelectMany(t => t.Album.MetadataTags
+                .Where(mt => mt.MetadataTag.Kind == MetadataTagKind.Genre)
+                .Select(mt => mt.MetadataTag.DisplayName))
+            .Distinct()
+            .ToListAsync(ct);
+        var artistGenres = trackGenres.Concat(albumGenres).Distinct().ToList();
+        if (artistGenres.Count == 0)
+            return [];
 
-        var artistTrackIds = await ApplyExcludeIdsFilter(BuildLightTrackIdQuery(userId, libraryIds), request.ExcludeIds)
-            .Where(t => t.PersonRoles.Any(r => r.PersonId == artistId)
-                     || t.Album.PersonRoles.Any(r => r.PersonId == artistId))
+        var query = WhereNotLinkedToMusicArtist(playable, artistId);
+        if (excludeIds.Count > 0)
+            query = query.Where(t => !excludeIds.Contains(t.Id));
+
+        return await query
+            .Where(t => t.MetadataTags.Any(mt =>
+                    mt.MetadataTag.Kind == MetadataTagKind.Genre
+                    && artistGenres.Contains(mt.MetadataTag.DisplayName))
+                || t.Album.MetadataTags.Any(mt =>
+                    mt.MetadataTag.Kind == MetadataTagKind.Genre
+                    && artistGenres.Contains(mt.MetadataTag.DisplayName)))
             .OrderBy(_ => EF.Functions.Random())
             .Select(t => t.Id)
-            .Take((int)(request.Limit * 0.6))
+            .Take(take)
             .ToListAsync(ct);
-
-        var relatedTrackIds = await ApplyExcludeIdsFilter(BuildLightTrackIdQuery(userId, libraryIds), request.ExcludeIds)
-            .Where(t => !t.PersonRoles.Any(r => r.PersonId == artistId)
-                     && !t.Album.PersonRoles.Any(r => r.PersonId == artistId))
-            .Where(t => t.MetadataTags.Any(mt => mt.MetadataTag.Kind == MetadataTagKind.Genre && artistGenres.Contains(mt.MetadataTag.DisplayName))
-                     || t.Album.MetadataTags.Any(mt => mt.MetadataTag.Kind == MetadataTagKind.Genre && artistGenres.Contains(mt.MetadataTag.DisplayName)))
-            .OrderBy(_ => EF.Functions.Random())
-            .Select(t => t.Id)
-            .Take(request.Limit - (int)(request.Limit * 0.6))
-            .ToListAsync(ct);
-
-        var selectedIds = artistTrackIds
-            .Concat(relatedTrackIds)
-            .Take(request.Limit)
-            .ToList();
-
-        return await LoadTracksByIdsAsync(selectedIds, userId, libraryIds, ct);
     }
+
+    private static IQueryable<MusicTrack> WhereLinkedToMusicArtist(IQueryable<MusicTrack> query, Guid artistId) =>
+        query.Where(t =>
+            t.ArtistId == artistId
+            || t.Album.ArtistId == artistId
+            || t.ArtistCredits.Any(c => c.MusicArtistId == artistId)
+            || t.Album.ArtistCredits.Any(c => c.MusicArtistId == artistId));
+
+    private static IQueryable<MusicTrack> WhereLinkedToAnyMusicArtist(
+        IQueryable<MusicTrack> query,
+        IReadOnlyList<Guid> artistIds) =>
+        query.Where(t =>
+            (t.ArtistId != null && artistIds.Contains(t.ArtistId.Value))
+            || (t.Album.ArtistId != null && artistIds.Contains(t.Album.ArtistId.Value))
+            || t.ArtistCredits.Any(c => artistIds.Contains(c.MusicArtistId))
+            || t.Album.ArtistCredits.Any(c => artistIds.Contains(c.MusicArtistId)));
+
+    private static IQueryable<MusicTrack> WhereNotLinkedToMusicArtist(IQueryable<MusicTrack> query, Guid artistId) =>
+        query.Where(t =>
+            (t.ArtistId == null || t.ArtistId != artistId)
+            && (t.Album.ArtistId == null || t.Album.ArtistId != artistId)
+            && !t.ArtistCredits.Any(c => c.MusicArtistId == artistId)
+            && !t.Album.ArtistCredits.Any(c => c.MusicArtistId == artistId));
 
     private async Task<List<BaseMedia>> GetGenreMix(
         GetMusicRadioQuery request,
@@ -570,6 +733,37 @@ public class GetMusicRadioQueryHandler(
 
         return track.Ratings.OfType<UserRating>().Any(r => r.UserId == userId && r.Value > 0)
             || (track.Album?.Ratings.OfType<UserRating>().Any(r => r.UserId == userId && r.Value > 0) ?? false);
+    }
+
+    private static List<Guid> InterleaveArtistRadio(
+        IReadOnlyList<Guid> artistIds,
+        IReadOnlyList<Guid> similarIds,
+        int limit)
+    {
+        if (similarIds.Count == 0)
+            return artistIds.Take(limit).ToList();
+
+        var result = new List<Guid>(Math.Min(limit, artistIds.Count + similarIds.Count));
+        var seen = new HashSet<Guid>();
+        var artistIndex = 0;
+        var similarIndex = 0;
+        while (result.Count < limit && (artistIndex < artistIds.Count || similarIndex < similarIds.Count))
+        {
+            if (artistIndex < artistIds.Count && seen.Add(artistIds[artistIndex]))
+                result.Add(artistIds[artistIndex]);
+            artistIndex++;
+            if (result.Count >= limit)
+                break;
+
+            for (var slot = 0; slot < 2 && result.Count < limit && similarIndex < similarIds.Count; slot++)
+            {
+                if (seen.Add(similarIds[similarIndex]))
+                    result.Add(similarIds[similarIndex]);
+                similarIndex++;
+            }
+        }
+
+        return result;
     }
 
     private static List<Guid> InterleaveUnique(IReadOnlyList<List<Guid>> batches, HashSet<Guid> seen)
