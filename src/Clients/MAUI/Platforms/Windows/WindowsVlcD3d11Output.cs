@@ -5,6 +5,7 @@ using K7.Clients.MAUI.Playback;
 using LibVLCSharp;
 using SharpDX.Direct3D11;
 using SharpDX.DXGI;
+using SharpDX.Mathematics.Interop;
 using Device = SharpDX.Direct3D11.Device;
 using DeviceContext = SharpDX.Direct3D11.DeviceContext;
 using MediaPlayer = LibVLCSharp.MediaPlayer;
@@ -358,6 +359,9 @@ internal sealed unsafe class WindowsVlcD3d11Output : IDisposable
 
             try
             {
+                // Clear first so Fit letterbox/pillarbox margins are black after
+                // leaving Fill/Stretch (LibVLC only blits the video rect).
+                _context.ClearRenderTargetView(_rtv, new RawColor4(0f, 0f, 0f, 1f));
                 _context.OutputMerger.SetTargets(_rtv);
                 return true;
             }
