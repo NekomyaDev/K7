@@ -161,11 +161,12 @@ internal sealed unsafe class WindowsVlcD3d11Output : IDisposable
     }
 
     /// <summary>
-    /// App-exit path: mark dead and drop SharpDX wrappers without Dispose.
-    /// WinUI owns the SwapChainPanel device; disposing it while Closing tears down the
-    /// panel races Present and surfaces as ExecutionEngineException.
+    /// Mark dead and drop SharpDX wrappers without COM Dispose.
+    /// WinUI owns the SwapChainPanel device. Disposing adopted wrappers while Present
+    /// can still run (app exit, Direct to HLS quality swap) races into
+    /// ExecutionEngineException / AccessViolation.
     /// </summary>
-    public void SoftReleaseForAppExit()
+    public void SoftReleaseAdoptedDevices()
     {
         _disposed = true;
         lock (_gate)
@@ -188,6 +189,9 @@ internal sealed unsafe class WindowsVlcD3d11Output : IDisposable
             }
         }
     }
+
+    /// <inheritdoc cref="SoftReleaseAdoptedDevices"/>
+    public void SoftReleaseForAppExit() => SoftReleaseAdoptedDevices();
 
     /// <summary>
     /// Unregister output callbacks before disposing the MediaPlayer / SwapChainPanel.

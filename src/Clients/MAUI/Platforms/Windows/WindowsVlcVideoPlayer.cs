@@ -73,6 +73,7 @@ internal sealed class WindowsVlcVideoPlayer : IDesktopVlcVideoPlayer
     private double _lastPublishedSeconds = -1;
     private long _ticksPerSecond = VlcTime.MicrosecondsPerSecond;
     private bool _ticksScaleLogged;
+    private Task? _teardownTask;
 
     public WindowsVlcVideoPlayer(Grid host)
     {
@@ -263,9 +264,11 @@ internal sealed class WindowsVlcVideoPlayer : IDesktopVlcVideoPlayer
             {
             }
 
+            // Soft-release WinUI-owned D3D wrappers. Hard Dispose races Present on
+            // Direct -> HLS quality swaps the same way Closing does.
             try
             {
-                d3d.Dispose();
+                d3d.SoftReleaseAdoptedDevices();
             }
             catch
             {
@@ -291,7 +294,7 @@ internal sealed class WindowsVlcVideoPlayer : IDesktopVlcVideoPlayer
             }
         }
 
-        _ = Task.Run(() =>
+        _teardownTask = Task.Run(() =>
         {
             try
             {
@@ -400,7 +403,7 @@ internal sealed class WindowsVlcVideoPlayer : IDesktopVlcVideoPlayer
 
             try
             {
-                d3d.SoftReleaseForAppExit();
+                d3d.SoftReleaseAdoptedDevices();
             }
             catch
             {
@@ -435,7 +438,7 @@ internal sealed class WindowsVlcVideoPlayer : IDesktopVlcVideoPlayer
 
         UnhookPlatformVideoView();
 
-        _ = Task.Run(() =>
+        _teardownTask = Task.Run(() =>
         {
             try
             {
@@ -771,13 +774,24 @@ internal sealed class WindowsVlcVideoPlayer : IDesktopVlcVideoPlayer
         }
 
         UnhookPlatformVideoView();
-        try
-        {
-            _host.Children.Remove(_videoView);
-        }
-        catch
-        {
-        }
+
+        // Remove the SwapChainPanel only after LibVLC Stop settles. Sync remove during
+        // Direct -> HLS quality swaps races Present into AccessViolation.
+        var host = _host;
+        var videoView = _videoView;
+        var teardown = _teardownTask ?? Task.CompletedTask;
+        _ = teardown.ContinueWith(
+            _ => MainThread.BeginInvokeOnMainThread(() =>
+            {
+                try
+                {
+                    host.Children.Remove(videoView);
+                }
+                catch
+                {
+                }
+            }),
+            TaskScheduler.Default);
     }
 
     private void OnVideoViewHandlerChanged(object? sender, EventArgs e)
@@ -950,7 +964,8 @@ internal sealed class WindowsVlcVideoPlayer : IDesktopVlcVideoPlayer
         {
             _d3d11.FirstPresented -= OnD3d11FirstPresented;
             _d3d11.Detach(_player);
-            _d3d11.Dispose();
+            // Soft-release: mid-session engine recreate must not COM-Dispose under Present.
+            _d3d11.SoftReleaseAdoptedDevices();
         }
         catch (Exception ex)
         {

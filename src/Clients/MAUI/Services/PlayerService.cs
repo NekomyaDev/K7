@@ -623,6 +623,15 @@ internal class PlayerService(
         if (_baseManifestUrl is null)
             return Task.CompletedTask;
 
+        // Same label is a no-op (avoids Direct reopen / D3D teardown on a re-tap).
+        if (quality is not null
+            && _selectedQuality is not null
+            && quality.Label == _selectedQuality.Label
+            && quality.IsOriginal == _selectedQuality.IsOriginal)
+        {
+            return Task.CompletedTask;
+        }
+
         // Explicit user quality changes reset Windows Video.js recovery budget for the new selection.
         _playbackStartRecoveryAttempts = 0;
         _remuxReloadsDone = 0;
