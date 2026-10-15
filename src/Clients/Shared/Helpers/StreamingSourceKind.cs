@@ -64,18 +64,29 @@ public static class StreamingSourceKind
     }
 
     /// <summary>
-    /// Ensures Video.js / VHS master requests use video-only CODECS (MSE isTypeSupported).
+    /// Ensures Video.js / VHS master requests use video-only CODECS (MSE isTypeSupported)
+    /// and stereo-capped AAC (WebView2 / WebKitGTK reject multichannel AAC appends).
     /// </summary>
     public static string EnsureVideoJsHlsManifestQuery(string url)
     {
         if (string.IsNullOrWhiteSpace(url))
             return url;
 
-        if (url.Contains("VideoCodecsOnly=", StringComparison.OrdinalIgnoreCase))
-            return url;
+        if (!url.Contains("VideoCodecsOnly=", StringComparison.OrdinalIgnoreCase))
+        {
+            var separator = url.Contains('?', StringComparison.Ordinal) ? "&" : "?";
+            url += separator + "VideoCodecsOnly=true";
+        }
 
-        var separator = url.Contains('?', StringComparison.Ordinal) ? "&" : "?";
-        return url + separator + "VideoCodecsOnly=true";
+        // Direct -> HLS quality promote builds the master without GetStreamUri; without this
+        // MaxAudioChannels stays null and AAC keeps 5.1 (Video.js "audio append failed").
+        if (!url.Contains("MaxAudioChannels=", StringComparison.OrdinalIgnoreCase))
+        {
+            var separator = url.Contains('?', StringComparison.Ordinal) ? "&" : "?";
+            url += separator + "MaxAudioChannels=2";
+        }
+
+        return url;
     }
 
     /// <summary>

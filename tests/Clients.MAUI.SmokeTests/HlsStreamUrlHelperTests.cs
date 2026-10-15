@@ -106,20 +106,33 @@ public class HlsStreamUrlHelperTests
     }
 
     [Test]
-    public void EnsureWindowsHlsAudioTranscodeQuery_ShouldAppendAac_WhenAudioUrlMissingCodec()
+    public void EnsureWindowsHlsAudioTranscodeQuery_ShouldAppendAacStereo_WhenAudioUrlMissingCodec()
     {
         var url = "https://host/api/indexed-files/1/hls-stream/audio/1/segments/init.m4s?streamSessionId=abc";
 
         var result = HlsStreamUrlHelper.EnsureWindowsHlsAudioTranscodeQuery(url);
 
         result.Should().Contain("TranscodingAudioCodec=aac");
+        result.Should().Contain("TranscodingAudioChannels=2");
         result.Should().StartWith(url);
     }
 
     [Test]
-    public void EnsureWindowsHlsAudioTranscodeQuery_ShouldLeaveUrl_WhenAlreadyHasCodec()
+    public void EnsureWindowsHlsAudioTranscodeQuery_ShouldAppendStereo_WhenCodecPresentWithoutChannels()
     {
         var url = "https://host/api/indexed-files/1/hls-stream/audio/1/index.m3u8?TranscodingAudioCodec=aac";
+
+        var result = HlsStreamUrlHelper.EnsureWindowsHlsAudioTranscodeQuery(url);
+
+        result.Should().Contain("TranscodingAudioCodec=aac");
+        result.Should().Contain("TranscodingAudioChannels=2");
+    }
+
+    [Test]
+    public void EnsureWindowsHlsAudioTranscodeQuery_ShouldLeaveUrl_WhenAlreadyHasCodecAndChannels()
+    {
+        var url =
+            "https://host/api/indexed-files/1/hls-stream/audio/1/index.m3u8?TranscodingAudioCodec=aac&TranscodingAudioChannels=2";
 
         HlsStreamUrlHelper.EnsureWindowsHlsAudioTranscodeQuery(url).Should().Be(url);
     }
@@ -145,7 +158,8 @@ public class HlsStreamUrlHelperTests
 
         var result = HlsStreamUrlHelper.AbsolutizeManifestUrls(manifest, baseUrl);
 
-        result.Should().Contain("URI=\"https://host/api/indexed-files/1/hls-stream/audio/1/index.m3u8?streamSessionId=abc&TranscodingAudioCodec=aac\"");
+        result.Should().Contain(
+            "URI=\"https://host/api/indexed-files/1/hls-stream/audio/1/index.m3u8?streamSessionId=abc&TranscodingAudioCodec=aac&TranscodingAudioChannels=2\"");
         result.Should().Contain("https://host/api/indexed-files/1/hls-stream/video/720p/index.m3u8?streamSessionId=abc");
         result.Should().NotContain("video/720p/index.m3u8?streamSessionId=abc&TranscodingAudioCodec");
     }
@@ -165,8 +179,8 @@ public class HlsStreamUrlHelperTests
         var result = HlsStreamUrlHelper.AbsolutizeManifestUrls(manifest, baseUrl);
 
         result.Should().Contain(
-            "URI=\"https://host/api/indexed-files/1/hls-stream/audio/1/segments/init.m4s?streamSessionId=abc&TranscodingAudioCodec=aac\"");
+            "URI=\"https://host/api/indexed-files/1/hls-stream/audio/1/segments/init.m4s?streamSessionId=abc&TranscodingAudioCodec=aac&TranscodingAudioChannels=2\"");
         result.Should().Contain(
-            "https://host/api/indexed-files/1/hls-stream/audio/1/segments/191.m4s?streamSessionId=abc&TranscodingAudioCodec=aac");
+            "https://host/api/indexed-files/1/hls-stream/audio/1/segments/191.m4s?streamSessionId=abc&TranscodingAudioCodec=aac&TranscodingAudioChannels=2");
     }
 }

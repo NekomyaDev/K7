@@ -78,18 +78,27 @@ public static partial class HlsStreamUrlHelper
     }
 
     /// <summary>
-    /// Ensures demuxed audio HLS requests ask the server for AAC (Video.js / MSE path).
+    /// Ensures demuxed audio HLS requests ask the server for stereo AAC (Video.js / MSE path).
+    /// Multichannel AAC appends fail in WebView2 / WebKitGTK even when codec is AAC.
     /// </summary>
     public static string EnsureWindowsHlsAudioTranscodeQuery(string url)
     {
         if (string.IsNullOrEmpty(url) || !IsHlsAudioResourceUrl(url))
             return url;
 
-        if (url.Contains("TranscodingAudioCodec=", StringComparison.OrdinalIgnoreCase))
-            return url;
+        if (!url.Contains("TranscodingAudioCodec=", StringComparison.OrdinalIgnoreCase))
+        {
+            var separator = url.Contains('?', StringComparison.Ordinal) ? "&" : "?";
+            url += separator + "TranscodingAudioCodec=aac";
+        }
 
-        var separator = url.Contains('?', StringComparison.Ordinal) ? "&" : "?";
-        return url + separator + "TranscodingAudioCodec=aac";
+        if (!url.Contains("TranscodingAudioChannels=", StringComparison.OrdinalIgnoreCase))
+        {
+            var separator = url.Contains('?', StringComparison.Ordinal) ? "&" : "?";
+            url += separator + "TranscodingAudioChannels=2";
+        }
+
+        return url;
     }
 
     private static string AbsolutizePlaylistUri(string uri, Uri manifestUrl, bool ensureAacOnAudio)

@@ -663,8 +663,9 @@ internal class PlayerService(
         newUrl = BuildManifestUrlWithSubtitleSettings(newUrl, _selectedSubtitleTrack);
         if (_selectedAudioTrack is not null)
             newUrl = BuildManifestUrlWithAudioTrack(newUrl, _selectedAudioTrack.Index);
-#if WINDOWS
-        // Direct->HLS promotes start without GetStreamUri Video.js flags.
+#if WINDOWS || LINUX
+        // Direct->HLS promotes start without GetStreamUri Video.js flags
+        // (VideoCodecsOnly + MaxAudioChannels=2 for MSE stereo AAC).
         if (StreamingSourceKind.IsHls("application/vnd.apple.mpegurl", newUrl))
             newUrl = StreamingSourceKind.EnsureVideoJsHlsManifestQuery(newUrl);
 #endif

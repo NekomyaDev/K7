@@ -54,6 +54,7 @@ public class StreamingSourceKindTests
                 videoJsCompatible: true)
             .Should().BeTrue();
         hls.Should().Contain("VideoCodecsOnly=true");
+        hls.Should().Contain("MaxAudioChannels=2");
         hls.Should().Contain("StreamSessionId=bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
     }
 
@@ -66,6 +67,7 @@ public class StreamingSourceKindTests
 
         once.Should().Be(twice);
         once.Should().Contain("VideoCodecsOnly=true");
+        once.Should().Contain("MaxAudioChannels=2");
     }
 
     [Test]

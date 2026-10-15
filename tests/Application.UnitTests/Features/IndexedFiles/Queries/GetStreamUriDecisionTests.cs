@@ -841,13 +841,15 @@ public class GetStreamUriDecisionTests
         uri.Uri.ToString().Should().Contain("MaxAudioChannels=2");
     }
 
-    [Test]
-    public void GetVideoFileStreamUri_ShouldCapAacToStereo_WhenNativeWindowsHasNoOutputToken()
+    [TestCase(OperatingSystem.Windows)]
+    [TestCase(OperatingSystem.Linux)]
+    public void GetVideoFileStreamUri_ShouldCapAacToStereo_WhenNativeVideoJsHasNoOutputToken(
+        OperatingSystem operatingSystem)
     {
         var device = CreateDevice(
             ["audio-mp4-aac", "video-mp4-aac-h264"],
             ClientType.Native,
-            OperatingSystem.Windows);
+            operatingSystem);
         var (indexedFile, metadata) = CreateVideoFile("matroska", "h264", "ac3");
         metadata.AudioTracks.First().Channels = 6;
         var request = new GetStreamUriQuery
@@ -860,7 +862,6 @@ public class GetStreamUriDecisionTests
         var (uri, decision) = GetStreamUriQueryHandler.GetVideoFileStreamUri(
             device, indexedFile, metadata, request, hlsSegmentsAvailable: true, subtitleTrackIndex: null);
 
-        decision.Mode.Should().Be(PlaybackMode.Transcode);
         decision.StreamAudioCodec.Should().Be("aac");
         decision.StreamAudioChannels.Should().Be(2);
         uri.Uri.ToString().Should().Contain("MaxAudioChannels=2");

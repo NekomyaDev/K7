@@ -333,16 +333,20 @@ public class GetStreamUriQueryHandler(
         && device.OperatingSystem == OperatingSystem.Windows;
 
     /// <summary>
-    /// WebView2 MSE rejects multichannel AAC appends (Video.js "audio append failed").
-    /// Native Windows HLS is that player, so cap the encode at stereo. Direct Play
+    /// WebView2 / WebKitGTK MSE reject multichannel AAC appends (Video.js "audio append failed").
+    /// Native Windows and Linux HLS use that player, so cap the encode at stereo. Direct Play
     /// never reads this and keeps 5.1 in LibVLC. A lower device token still wins.
     /// </summary>
     internal static int? ResolveHlsDeviceMaxAudioChannels(Device device)
     {
         var max = AudioOutputChannelTokens.TryReadMaxChannels(
             device.PlaybackCapabilities.SupportedMediaFormatIds);
-        if (ForcesWindowsHlsEncode(device) && (max is null || max > 2))
+        if (device.ClientType == ClientType.Native
+            && UsesVideoJsHlsManifest(device)
+            && (max is null || max > 2))
+        {
             return 2;
+        }
 
         return max;
     }
