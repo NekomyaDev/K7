@@ -83,7 +83,15 @@ public partial class SelectProfile
                 if (autoUser is not null)
                 {
                     K7.Clients.Shared.Services.AppReadySignal.Signal();
-                    await AuthenticateUserAsync(autoUser);
+                    // Dead refresh token: show the picker (reconnect badge), never open the
+                    // system browser under a spinner - that left users stuck after snackbar.
+                    if (NeedsReconnect(autoUser))
+                    {
+                        Snackbar.Add(string.Format(L["SessionExpired"], autoUser.UserName), K7Severity.Error);
+                        return;
+                    }
+
+                    await AuthenticateUserAsync(autoUser, allowInteractiveReconnect: false);
                     return;
                 }
             }
@@ -233,7 +241,7 @@ public partial class SelectProfile
                     return;
             }
 
-            await AuthenticateUserAsync(user);
+            await AuthenticateUserAsync(user, allowInteractiveReconnect: true);
         }
         finally
         {
@@ -335,7 +343,7 @@ public partial class SelectProfile
         StateHasChanged();
     }
 
-    private async Task AuthenticateUserAsync(LocalUser user)
+    private async Task AuthenticateUserAsync(LocalUser user, bool allowInteractiveReconnect)
     {
         _loading = true;
         _showOfflineButton = false;
@@ -358,7 +366,15 @@ public partial class SelectProfile
             else
             {
                 Snackbar.Add(string.Format(L["SessionExpired"], user.UserName), K7Severity.Error);
-                await ReconnectExpiredProfileAsync(user);
+                // Solo auto-login must not start LoginAsync under the spinner (browser wait /
+                // failed callback left an infinite load). Manual picks still reconnect.
+                if (allowInteractiveReconnect)
+                    await ReconnectExpiredProfileAsync(user);
+                else
+                {
+                    _users = LocalUserService.GetAll();
+                    ShowCarousel();
+                }
             }
         }
         catch (HttpRequestException)
