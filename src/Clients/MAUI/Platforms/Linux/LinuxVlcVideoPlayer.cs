@@ -78,6 +78,7 @@ internal sealed class LinuxVlcVideoPlayer : IDesktopVlcVideoPlayer
     private double? _coalescedDirectSeekSeconds;
     private bool _firstFrameRaised;
     private bool _firstFrameNotified;
+    private Task? _teardownTask;
     private bool _pendingPreciseStart;
     private AspectRatioMode _aspect = AspectRatioMode.Fit;
     private int? _pendingAudioOrdinal;
@@ -265,7 +266,7 @@ internal sealed class LinuxVlcVideoPlayer : IDesktopVlcVideoPlayer
 
         // Stop off the GTK thread: it joins the decoder threads and the vmem callbacks may
         // still be posting frames. The player itself is process-wide and stays alive.
-        _ = Task.Run(() =>
+        _teardownTask = Task.Run(() =>
         {
             try
             {
@@ -484,13 +485,24 @@ internal sealed class LinuxVlcVideoPlayer : IDesktopVlcVideoPlayer
         // The pending ClearPresentedFrame / PresentPendingFrame idles must not reach a widget
         // that the layout is about to unparent and free.
         _picture = null;
-        try
-        {
-            _host.Children.Remove(_videoView);
-        }
-        catch
-        {
-        }
+
+        // Defer Remove until LibVLC Stop settles. Sync unparent during Direct -> HLS
+        // quality swaps can SIGSEGV while vmem still posts frames.
+        var host = _host;
+        var videoView = _videoView;
+        var teardown = _teardownTask ?? Task.CompletedTask;
+        _ = teardown.ContinueWith(
+            _ => MainThread.BeginInvokeOnMainThread(() =>
+            {
+                try
+                {
+                    host.Children.Remove(videoView);
+                }
+                catch
+                {
+                }
+            }),
+            TaskScheduler.Default);
     }
 
     private void OnPictureChanged(Gtk.Picture? picture)

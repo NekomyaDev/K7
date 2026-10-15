@@ -129,8 +129,17 @@ public partial class RatingStars : IAsyncDisposable
         _currentValue = value;
         _ = InvokeAsync(async () =>
         {
-            await ValueChanged.InvokeAsync(value);
-            StateHasChanged();
+            try
+            {
+                await ValueChanged.InvokeAsync(value);
+                StateHasChanged();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+            catch (InvalidOperationException)
+            {
+            }
         });
     }
 
@@ -290,9 +299,9 @@ public partial class RatingStars : IAsyncDisposable
 
     private async Task RateAsync(int value)
     {
-        Ratings.Set(MediaId, value > 0 ? value : null);
         try
         {
+            Ratings.Set(MediaId, value > 0 ? value : null);
             if (Connectivity.IsOnline)
             {
                 await K7ServerService.RateMediaAsync(MediaId, value);

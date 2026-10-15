@@ -4950,6 +4950,9 @@ K7.RatingStars = {
             cancel: function () { dotNetRef.invokeMethodAsync('OnEditCancel'); },
             pointerDown: function (e) {
                 if (e.button != null && e.button !== 0) return;
+                // WebKitGTK: setPointerCapture can SIGSEGV (try/catch cannot catch native abort).
+                // Blazor pointermove/up still handle drag-to-rate without capture.
+                if (window.K7_LINUX_GTK) return;
                 try { el.setPointerCapture(e.pointerId); } catch (ex) { }
             }
         };
