@@ -146,6 +146,9 @@ public class GetMediaQueryHandler(
         if (userId is { } exclusionUserId)
             await MediaGraphExclusionFilter.ApplyAsync(context, entity, exclusionUserId, cancellationToken);
 
+        if (entity is MusicArtist artist)
+            await PruneUnplayableAlbumsAsync(artist, userId, cancellationToken);
+
         if (sharedProfileId is { } profileId && userId is { } actingUserId)
         {
             await SharedProfileUserStateOverlay.ApplyAsync(
@@ -173,5 +176,32 @@ public class GetMediaQueryHandler(
             : [];
 
         return new GetMediaResult(entity, totalPlayCount, libraryId, itemBookmarks);
+    }
+
+    private async Task PruneUnplayableAlbumsAsync(
+        MusicArtist artist,
+        Guid? userId,
+        CancellationToken cancellationToken)
+    {
+        if (artist.Albums.Count == 0)
+            return;
+
+        HashSet<Guid>? excludedLibraryIds = null;
+        if (userId is Guid exclusionUserId)
+        {
+            excludedLibraryIds = await context.UserLibraryExclusions
+                .AsNoTracking()
+                .Where(e => e.UserId == exclusionUserId && (e.IsAdminExcluded || e.IsSelfExcluded))
+                .Select(e => e.LibraryId)
+                .ToHashSetAsync(cancellationToken);
+        }
+
+        var playableIds = await CatalogMediaAvailabilityHelper.GetPlayableAlbumIdsAsync(
+            context,
+            artist.Albums.Select(a => a.Id).ToList(),
+            excludedLibraryIds,
+            cancellationToken);
+
+        artist.Albums = artist.Albums.Where(a => playableIds.Contains(a.Id)).ToList();
     }
 }

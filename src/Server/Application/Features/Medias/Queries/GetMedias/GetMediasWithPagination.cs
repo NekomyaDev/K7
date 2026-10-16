@@ -268,9 +268,18 @@ public class GetMediasQueryHandler(IApplicationDbContext context, IUser currentU
 
         if (request.ArtistIds?.Length > 0)
         {
+            // Artist pages only list albums and tracks that can be played. K7-import shells
+            // (no indexed file) stay out.
             query = query.Where(x =>
-                (x is MusicTrack && (request.ArtistIds.Contains(((MusicTrack)x).ArtistId!.Value) || request.ArtistIds.Contains(((MusicTrack)x).Album!.ArtistId!.Value)))
-                || (x is MusicAlbum && request.ArtistIds.Contains(((MusicAlbum)x).ArtistId!.Value)));
+                (x is MusicTrack
+                    && (request.ArtistIds.Contains(((MusicTrack)x).ArtistId!.Value)
+                        || request.ArtistIds.Contains(((MusicTrack)x).Album!.ArtistId!.Value))
+                    && (((MusicTrack)x).IndexedFiles.Any() || ((MusicTrack)x).RemoteIndexedFiles.Any()))
+                || (x is MusicAlbum
+                    && request.ArtistIds.Contains(((MusicAlbum)x).ArtistId!.Value)
+                    && (((MusicAlbum)x).IndexedFiles.Any()
+                        || ((MusicAlbum)x).RemoteIndexedFiles.Any()
+                        || ((MusicAlbum)x).Tracks.Any(t => t.IndexedFiles.Any() || t.RemoteIndexedFiles.Any()))));
         }
 
         if (request.Genres?.Length > 0)

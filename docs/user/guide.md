@@ -194,6 +194,8 @@ Optional **custom navigation** (Settings -> Navigation) can pin those groups, a 
 
 **Shared with me** on playlists and collections keeps the same grid / list / table and adds items others have shared with you. The owner name is shown on those cards (and as a table column). What others see of your playlists, collections, reviews, and history is controlled under [Privacy](#privacy-and-visibility) (and per-item visibility where offered).
 
+Artist pages list albums and tracks that have a file in the library. A title imported without a matching file stays off that page.
+
 Album pages use the same minibar header. It stays pinned under the top menu while tracks scroll. Compact mode only turns on when the list would still scroll after the header shrinks. On desktop the compact bar also keeps rating, shuffle, review, and more when there is room. On a phone in landscape it starts minimized so the track list can scroll. Keyboard Up/Down on album and playlist track tables stays on the row (play) or the row menu, like library list and table browse.
 
 ## Privacy and visibility

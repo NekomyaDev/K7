@@ -10,6 +10,7 @@ using K7.Server.Application.Features.Libraries.Commands.IndexLibraryFiles;
 using K7.Server.Application.Features.Medias.Commands.RateMedia;
 using K7.Server.Application.Features.Medias.Commands.UpdatePlaybackProgress;
 using K7.Server.Application.Features.Medias.Queries.GetArtistTopTracks;
+using K7.Server.Application.Helpers;
 using K7.Server.Application.Features.Medias.Queries.GetSimilarMusicArtists;
 using K7.Server.Application.Features.MusicIntelligence.Queries.GetSimilarTracks;
 using K7.Server.Application.Features.Playlists.Commands.AddPlaylistItem;
@@ -199,7 +200,10 @@ public sealed partial class OpenSubsonicService
         var musicFolderId = GetGuid(parameters, "musicFolderId");
         var artists = await (await GetAccessibleArtistsQueryAsync(userId.Value, musicFolderId, cancellationToken))
             .OrderBy(a => a.SortTitle ?? a.Title)
-            .Include(a => a.Albums)
+            .Include(a => a.Albums.Where(al =>
+                al.IndexedFiles.Any()
+                || al.RemoteIndexedFiles.Any()
+                || al.Tracks.Any(t => t.IndexedFiles.Any() || t.RemoteIndexedFiles.Any())))
             .Include(a => a.Ratings)
             .ToListAsync(cancellationToken);
 
@@ -249,6 +253,8 @@ public sealed partial class OpenSubsonicService
 
         if (artist is null)
             return OpenSubsonicActionResult.Fail(OpenSubsonicConstants.ErrorNotFound, "Artist not found.");
+
+        await KeepPlayableAlbumsAsync(artist, userId.Value, cancellationToken);
 
         var mapped = MapArtist(artist, userId.Value);
         mapped = new OpenSubsonicArtist
@@ -507,6 +513,8 @@ public sealed partial class OpenSubsonicService
 
         if (artist is not null)
         {
+            await KeepPlayableAlbumsAsync(artist, userId.Value, cancellationToken);
+
             return OpenSubsonicActionResult.Ok(new Dictionary<string, object?>
             {
                 ["directory"] = new OpenSubsonicDirectory
@@ -890,6 +898,26 @@ public sealed partial class OpenSubsonicService
         {
             ["topSongs"] = new Dictionary<string, object?> { ["song"] = songs }
         });
+    }
+
+    private async Task KeepPlayableAlbumsAsync(MusicArtist artist, Guid userId, CancellationToken cancellationToken)
+    {
+        if (artist.Albums.Count == 0)
+            return;
+
+        var excludedLibraryIds = await context.UserLibraryExclusions
+            .AsNoTracking()
+            .Where(e => e.UserId == userId && (e.IsAdminExcluded || e.IsSelfExcluded))
+            .Select(e => e.LibraryId)
+            .ToHashSetAsync(cancellationToken);
+
+        var playableIds = await CatalogMediaAvailabilityHelper.GetPlayableAlbumIdsAsync(
+            context,
+            artist.Albums.Select(a => a.Id).ToList(),
+            excludedLibraryIds.Count == 0 ? null : excludedLibraryIds,
+            cancellationToken);
+
+        artist.Albums = artist.Albums.Where(a => playableIds.Contains(a.Id)).ToList();
     }
 
 }

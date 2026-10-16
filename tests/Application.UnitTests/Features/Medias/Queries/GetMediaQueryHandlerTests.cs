@@ -2,6 +2,7 @@ using K7.Server.Application.Common.Interfaces;
 using K7.Server.Application.Common.Mappings;
 using K7.Server.Application.Features.Medias.Queries.GetMedia;
 using K7.Server.Application.Services;
+using K7.Server.Domain.Entities;
 using K7.Server.Domain.Entities.Medias;
 using K7.Server.Domain.Entities.Ratings;
 using K7.Server.Domain.Entities.Users;
@@ -193,6 +194,8 @@ public class GetMediaQueryHandlerTests
     {
         var artistId = Guid.NewGuid();
         var albumId = Guid.NewGuid();
+        var shellAlbumId = Guid.NewGuid();
+        var trackId = Guid.NewGuid();
         var artist = new MusicArtist
         {
             Id = artistId,
@@ -207,8 +210,56 @@ public class GetMediaQueryHandlerTests
             ArtistId = artistId,
             Artist = artist
         };
+        var shell = new MusicAlbum
+        {
+            Id = shellAlbumId,
+            Title = "Album (imported)",
+            SortTitle = "Album (imported)",
+            ArtistId = artistId,
+            Artist = artist
+        };
+        var track = new MusicTrack
+        {
+            Id = trackId,
+            AlbumId = albumId,
+            Title = "Track",
+            SortTitle = "Track"
+        };
         artist.Albums.Add(album);
-        _context.Medias.AddRange(artist, album);
+        artist.Albums.Add(shell);
+        album.Tracks.Add(track);
+
+        var groupId = Guid.NewGuid();
+        var libraryId = Guid.NewGuid();
+        _context.LibraryGroups.Add(new LibraryGroup
+        {
+            Id = groupId,
+            Title = "Music",
+            MediaType = LibraryMediaType.Music
+        });
+        _context.Libraries.Add(new Library
+        {
+            Id = libraryId,
+            LibraryGroupId = groupId,
+            Title = "Music",
+            MediaType = LibraryMediaType.Music,
+            RootPath = "/music",
+            MetadataProviderName = "musicbrainz",
+            MetadataLanguage = "fr",
+            MetadataFallbackLanguage = "en"
+        });
+        _context.IndexedFiles.Add(new IndexedFile
+        {
+            Id = Guid.NewGuid(),
+            LibraryId = libraryId,
+            MediaId = trackId,
+            Name = "track",
+            Extension = ".flac",
+            Path = "/music/album/track.flac",
+            Hash = 1,
+            Size = 1
+        });
+        _context.Medias.AddRange(artist, album, shell, track);
         _context.Ratings.Add(new UserRating
         {
             Id = Guid.NewGuid(),
@@ -224,7 +275,8 @@ public class GetMediaQueryHandlerTests
         var dto = (MusicArtistDto)result.Media.ToMediaDto(result.ItemBookmarks);
 
         dto.Albums.Should().ContainSingle();
-        GetUserRating(dto.Albums![0].Ratings).Should().Be(7);
+        dto.Albums![0].Id.Should().Be(albumId);
+        GetUserRating(dto.Albums[0].Ratings).Should().Be(7);
     }
 
     private static int? GetUserRating(IReadOnlyList<RatingDto>? ratings) =>

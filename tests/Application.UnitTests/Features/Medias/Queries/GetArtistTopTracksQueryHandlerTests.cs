@@ -185,7 +185,8 @@ public class GetArtistTopTracksQueryHandlerTests
             AlbumId = album.Id,
             Album = album,
             TrackNumber = trackNumber,
-            IndexedFiles = [CreateIndexedFile()]
+            IndexedFiles = [CreateIndexedFile()],
+            RemoteIndexedFiles = []
         };
 
     private static IndexedFile CreateIndexedFile() => new()

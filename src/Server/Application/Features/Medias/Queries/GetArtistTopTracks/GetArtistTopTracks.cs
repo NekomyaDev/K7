@@ -71,6 +71,7 @@ public class GetArtistTopTracksQueryHandler(
             from album in albumJoin.DefaultIfEmpty()
             let resolvedArtistId = track.ArtistId ?? album!.ArtistId
             where resolvedArtistId == artistId
+                && (track.IndexedFiles.Any() || track.RemoteIndexedFiles.Any())
             group state by track.Id into grouped
             orderby grouped.Sum(s => s.PlayCount) descending
             select grouped.Key)
@@ -89,6 +90,7 @@ public class GetArtistTopTracksQueryHandler(
             from album in albumJoin.DefaultIfEmpty()
             let resolvedArtistId = track.ArtistId ?? album!.ArtistId
             where resolvedArtistId == artistId
+                && (track.IndexedFiles.Any() || track.RemoteIndexedFiles.Any())
             join rating in context.Ratings.OfType<UserRating>() on track.Id equals rating.MediaId
             group rating by track.Id into grouped
             orderby grouped.Average(r => r.Value) descending, grouped.Count() descending
@@ -108,6 +110,7 @@ public class GetArtistTopTracksQueryHandler(
             from album in albumJoin.DefaultIfEmpty()
             let resolvedArtistId = track.ArtistId ?? album!.ArtistId
             where resolvedArtistId == artistId
+                && (track.IndexedFiles.Any() || track.RemoteIndexedFiles.Any())
             join rating in context.Ratings.OfType<MetadataProviderRating>() on track.Id equals rating.MediaId
             group rating by track.Id into grouped
             orderby grouped.Max(r => r.RatingCount ?? 0) descending,
@@ -128,6 +131,7 @@ public class GetArtistTopTracksQueryHandler(
             from album in albumJoin.DefaultIfEmpty()
             let resolvedArtistId = track.ArtistId ?? album!.ArtistId
             where resolvedArtistId == artistId
+                && (track.IndexedFiles.Any() || track.RemoteIndexedFiles.Any())
             where context.MediaLibraryAvailabilities.Any(a => a.MediaId == track.Id)
             orderby album!.ReleaseDate descending, track.DiscNumber, track.TrackNumber, track.SortTitle ?? track.Title
             select track.Id)
