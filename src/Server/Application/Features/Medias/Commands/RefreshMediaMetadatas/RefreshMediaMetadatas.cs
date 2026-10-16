@@ -405,6 +405,7 @@ public class RefreshMediaMetadatasCommandHandler : IRequestHandler<RefreshMediaM
                 ApplyMusicArtistLocalizedNames(artist, mbDetails.Name, mbDetails.OriginalName, mbDetails.SortName);
 
                 await SyncArtistMembersAsync(artist, mbDetails.Members, request.Language, cancellationToken);
+                await SoloArtistBirthDate.ApplyAsync(_context, artist, cancellationToken);
 
                 // Poster from MusicBrainz cover art
                 if (!artist.IsPictureTypeLocked(MetadataPictureType.Poster)
@@ -906,6 +907,7 @@ public class RefreshMediaMetadatasCommandHandler : IRequestHandler<RefreshMediaM
                 mbImageUrl = mbDetails.ImageUrl;
 
                 await SyncArtistMembersAsync(artist, mbDetails.Members, language, cancellationToken);
+                await SoloArtistBirthDate.ApplyAsync(_context, artist, cancellationToken);
             }
         }
 

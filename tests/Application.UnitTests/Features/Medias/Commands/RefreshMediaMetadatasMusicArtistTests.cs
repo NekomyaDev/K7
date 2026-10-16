@@ -1,8 +1,12 @@
 using K7.Server.Application.Features.Medias.Commands.RefreshMediaMetadatas;
 using K7.Server.Application.Features.Medias.Services;
 using K7.Server.Application.Features.MetadataPictures.Services;
+using K7.Server.Application.Helpers;
+using K7.Server.Domain.Entities;
 using K7.Server.Domain.Entities.Medias;
+using K7.Server.Domain.Entities.Metadatas;
 using K7.Server.Domain.Entities.Metadatas.External;
+using K7.Server.Domain.Entities.Metadatas.PersonRoles;
 using K7.Server.Domain.Interfaces;
 using K7.Server.Infrastructure.Database.Context.Data;
 using MediatR;
@@ -107,6 +111,63 @@ public class RefreshMediaMetadatasMusicArtistTests
             "Justin Timberlake",
             "en",
             Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task Handle_ShouldCopyBirthday_WhenSoloArtistHasNoFormationDate()
+    {
+        var artist = new MusicArtist { Title = "Stromae" };
+        artist.ExternalIds.Add(new ExternalId { ProviderName = "musicbrainz", Value = "stromae-mb" });
+        var person = new Person
+        {
+            Name = "Stromae",
+            Birthday = new DateOnly(1985, 3, 16)
+        };
+        person.ExternalIds.Add(new ExternalId { ProviderName = "musicbrainz", Value = "stromae-mb" });
+        artist.PersonRoles.Add(new MusicArtistMember { Person = person });
+        _context.Medias.Add(artist);
+        _context.Persons.Add(person);
+        await _context.SaveChangesAsync();
+
+        _artistProvider.FetchByProviderIdAsync("stromae-mb", "en", Arg.Any<CancellationToken>())
+            .Returns(new ExternalMusicArtistDetails
+            {
+                MusicBrainzArtistId = "stromae-mb",
+                Country = "BE"
+            });
+
+        await _handler.Handle(new RefreshMediaMetadatasCommand
+        {
+            MediaId = artist.Id,
+            MetadataProviderExternalId = "stromae-mb",
+            MetadataProviderName = "musicbrainz",
+            Language = "en",
+            FallbackLanguage = "en"
+        }, CancellationToken.None);
+
+        (await _context.Medias.OfType<MusicArtist>().SingleAsync()).ReleaseDate
+            .Should().Be(new DateOnly(1985, 3, 16));
+    }
+
+    [Test]
+    public async Task ApplyForPerson_ShouldCopyBirthdayOntoTheSoloArtist()
+    {
+        var artist = new MusicArtist { Title = "Stromae" };
+        var person = new Person
+        {
+            Name = "Stromae",
+            Birthday = new DateOnly(1985, 3, 16)
+        };
+        artist.PersonRoles.Add(new MusicArtistMember { Person = person });
+        _context.Medias.Add(artist);
+        _context.Persons.Add(person);
+        await _context.SaveChangesAsync();
+
+        await SoloArtistBirthDate.ApplyForPersonAsync(_context, person);
+        await _context.SaveChangesAsync();
+
+        (await _context.Medias.OfType<MusicArtist>().SingleAsync()).ReleaseDate
+            .Should().Be(new DateOnly(1985, 3, 16));
     }
 
     [Test]

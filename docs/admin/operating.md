@@ -333,6 +333,7 @@ After a successful re-identify the file is linked and drops off even if filename
 still missing. `UnidentifiedFile` is kept for API compat but is not shown separately.
 
 **Missing members** is music artists with no person credits (`PersonRoles`), not missing episodes or tracks.
+A solo artist's formation date falls back to that person's birth date when MusicBrainz has no formation date.
 
 **Missing files on a media** is not diagnosed: medias may intentionally remain without files for watch
 history, ratings, and stats.

@@ -93,6 +93,7 @@ public class RefreshPersonMetadataCommandHandler(
                 person.ExternalIds.Add(new ExternalId { ProviderName = entry.ProviderName, Value = entry.Value, PersonId = person.Id });
         }
 
+        await SoloArtistBirthDate.ApplyForPersonAsync(context, person, cancellationToken);
         await context.SaveChangesAsync(cancellationToken);
     }
 }
