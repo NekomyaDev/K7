@@ -378,7 +378,7 @@ public class GetDiagnosticsSummaryQueryHandler : IRequestHandler<GetDiagnosticsS
         var counts = await (
             from p in pairs
             join m in _context.Medias.AsNoTracking() on p.MediaId equals m.Id
-            where m.ExternalIds.Any()
+            where m.ExternalIds.Any(e => e.ProviderName.ToLower() != "spotify")
                 && m.Type != MediaType.SerieEpisode
                 && m.Type != MediaType.SerieSeason
                 && m.Type != MediaType.MusicArtist

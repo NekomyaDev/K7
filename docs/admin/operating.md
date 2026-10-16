@@ -334,6 +334,7 @@ still missing. `UnidentifiedFile` is kept for API compat but is not shown separa
 
 **Missing members** is music artists with no person credits (`PersonRoles`), not missing episodes or tracks.
 A solo artist's formation date falls back to that person's birth date when MusicBrainz has no formation date.
+Missing metadata is only raised when a usable external id exists and genres are still empty. No id stays on missing external id. A Spotify id alone is ignored, because K7 cannot fetch metadata from Spotify.
 
 **Missing files on a media** is not diagnosed: medias may intentionally remain without files for watch
 history, ratings, and stats.

@@ -223,6 +223,33 @@ public class GetDiagnosticsSummaryQueryHandlerTests
     }
 
     [Test]
+    public async Task Handle_ShouldNotCountMissingMetadata_WhenTheOnlyExternalIdIsSpotify()
+    {
+        var libraryId = SeedMovieLibrary();
+        var movieId = Guid.NewGuid();
+        _context.Medias.Add(new Movie { Id = movieId, Title = "Spotify Shell" });
+        _context.MediaLibraryAvailabilities.Add(new MediaLibraryAvailability
+        {
+            LibraryId = libraryId,
+            MediaId = movieId
+        });
+        _context.ExternalIds.Add(new ExternalId
+        {
+            Id = Guid.NewGuid(),
+            ProviderName = "spotify",
+            Value = "abc",
+            MediaId = movieId
+        });
+        await _context.SaveChangesAsync();
+
+        var summaries = await _handler.Handle(new GetDiagnosticsSummaryQuery(), CancellationToken.None);
+        var summary = summaries.Should().ContainSingle().Subject;
+
+        summary.MediaMissingExternalIdCount.Should().Be(0);
+        summary.MediaMissingMetadataCount.Should().Be(0);
+    }
+
+    [Test]
     public async Task Handle_ShouldNotCountMissingMetadata_ForEpisodesWithoutGenres()
     {
         var libraryId = SeedSerieLibrary();

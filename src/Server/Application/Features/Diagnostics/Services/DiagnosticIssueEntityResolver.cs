@@ -205,7 +205,7 @@ public class DiagnosticIssueEntityResolver(
             {
                 m.Id,
                 m.Type,
-                HasExternalIds = m.ExternalIds.Any(),
+                HasUsableExternalId = m.ExternalIds.Any(e => e.ProviderName.ToLower() != "spotify"),
                 GenreCount = m.MetadataTags.Count(mt => mt.MetadataTag.Kind == MetadataTagKind.Genre)
             })
             .ToListAsync(cancellationToken);
@@ -216,10 +216,7 @@ public class DiagnosticIssueEntityResolver(
                 if (m.Type is MediaType.SerieEpisode or MediaType.SerieSeason or MediaType.MusicArtist)
                     return false;
 
-                var isEnrichableMedia = m.Type is MediaType.Movie or MediaType.Serie or MediaType.MusicAlbum;
-                if (!m.HasExternalIds && !isEnrichableMedia && m.GenreCount == 0)
-                    return true;
-                return m.HasExternalIds && m.GenreCount == 0;
+                return m.HasUsableExternalId && m.GenreCount == 0;
             })
             .Select(m => m.Id)
             .ToList();

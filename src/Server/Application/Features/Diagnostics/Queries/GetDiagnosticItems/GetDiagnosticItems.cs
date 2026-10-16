@@ -484,6 +484,7 @@ public class GetDiagnosticItemsQueryHandler : IRequestHandler<GetDiagnosticItems
                 m.Type,
                 m.LastMetadataRefreshedAt,
                 HasExternalIds = m.ExternalIds.Any(),
+                HasUsableExternalId = m.ExternalIds.Any(e => e.ProviderName.ToLower() != "spotify"),
                 GenreCount = m.MetadataTags.Count(mt => mt.MetadataTag.Kind == MetadataTagKind.Genre),
                 IsMusicTrack = m is MusicTrack,
                 HasAudioAnalysis = m is MusicTrack && ((MusicTrack)m).AudioAnalysis != null
@@ -515,6 +516,7 @@ public class GetDiagnosticItemsQueryHandler : IRequestHandler<GetDiagnosticItems
                 {
                     Id = a.Id,
                     HasExternalIds = a.ExternalIds.Any(),
+                    HasUsableExternalId = a.ExternalIds.Any(e => e.ProviderName.ToLower() != "spotify"),
                     GenreCount = a.MetadataTags.Count(mt => mt.MetadataTag.Kind == MetadataTagKind.Genre)
                 })
                 .ToDictionaryAsync(a => a.Id, cancellationToken);
@@ -565,16 +567,17 @@ public class GetDiagnosticItemsQueryHandler : IRequestHandler<GetDiagnosticItems
             if (!m.HasExternalIds && isEnrichableMedia) issues.Add(DiagnosticIssue.MissingExternalId);
             // Episodes and seasons do not carry genres. Those live on the serie, and the
             // metadata editor does not show a genre field for them.
-            if (m.Type is not (MediaType.SerieEpisode or MediaType.SerieSeason or MediaType.MusicArtist))
+            if (m.Type is not (MediaType.SerieEpisode or MediaType.SerieSeason or MediaType.MusicArtist)
+                && m.HasUsableExternalId
+                && m.GenreCount == 0)
             {
-                if (!m.HasExternalIds && !isEnrichableMedia && m.GenreCount == 0) issues.Add(DiagnosticIssue.MissingMetadata);
-                if (m.HasExternalIds && m.GenreCount == 0) issues.Add(DiagnosticIssue.MissingMetadata);
+                issues.Add(DiagnosticIssue.MissingMetadata);
             }
 
             if (m.IsMusicTrack
                 && trackNavById.TryGetValue(m.Id, out var trackRef)
                 && albumMetadataById.TryGetValue(trackRef.AlbumId, out var albumInfo)
-                && (albumInfo.GenreCount > 0 || albumInfo.HasExternalIds))
+                && (albumInfo.GenreCount > 0 || albumInfo.HasUsableExternalId))
             {
                 issues.Remove(DiagnosticIssue.MissingMetadata);
             }
@@ -1123,6 +1126,7 @@ public class GetDiagnosticItemsQueryHandler : IRequestHandler<GetDiagnosticItems
     {
         public required Guid Id { get; init; }
         public required bool HasExternalIds { get; init; }
+        public required bool HasUsableExternalId { get; init; }
         public required int GenreCount { get; init; }
     }
 
