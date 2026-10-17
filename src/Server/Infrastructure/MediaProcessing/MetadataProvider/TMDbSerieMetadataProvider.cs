@@ -17,6 +17,8 @@ using TMDbLib.Client;
 using TMDbLib.Objects.General;
 using TMDbLib.Objects.TvShows;
 using MediaType = K7.Server.Domain.Enums.MediaType;
+using TmdbCast = TMDbLib.Objects.TvShows.Cast;
+using TmdbCrew = TMDbLib.Objects.General.Crew;
 
 namespace K7.Server.Infrastructure.MediaProcessing.MetadataProvider;
 
@@ -201,7 +203,7 @@ public class TMDbSerieMetadataProvider : ISerieMetadataProvider, ISearchableMeta
             Studios = [.. TmdbLibCompat.NonEmptyNames(show.ProductionCompanies?.Select(c => c.Name))],
             Trailers = TmdbLibCompat.MapYoutubeTrailers(show.Videos?.Results),
             RecommendedExternalIds = [.. show.Recommendations?.Results?.Select(r => r.Id.ToString()) ?? []],
-            PersonRoles = await ConvertToPersonRolesAsync(show.Credits, language, cancellationToken),
+            PersonRoles = ConvertToPersonRoles(show.Credits, guestStars: null, crew: null),
             ExternalIds = BuildExternalIds(providerId, show.ExternalIds),
             Pictures = FetchMetadataPictures(show.Images, language),
             Ratings = show.VoteCount > 0
@@ -328,7 +330,10 @@ public class TMDbSerieMetadataProvider : ISerieMetadataProvider, ISearchableMeta
             Runtime = episode.Runtime,
             StillImageUrl = stillUrl,
             ExternalIds = externalIds,
-            PersonRoles = await ConvertToPersonRolesAsync(episode.Credits, language, cancellationToken),
+            PersonRoles = ConvertToPersonRoles(
+                episode.Credits,
+                episode.GuestStars,
+                episode.Crew),
             Ratings = episode.VoteCount > 0
                 ? [new MetadataProviderRating { MetadataProvider = Domain.Enums.MetadataProvider.TMDb, Value = episode.VoteAverage, MinimumValue = 0, MaximumValue = 10, RatingCount = episode.VoteCount }]
                 : []
@@ -450,7 +455,7 @@ public class TMDbSerieMetadataProvider : ISerieMetadataProvider, ISearchableMeta
             });
 
         // Season catalog omits ExternalIds. Fetch them lightly so scrobbling (esp. TVDB) works
-        // without a full episode fetch (credits/images).
+        // without a full episode images fetch. Guest stars/crew come from the season payload.
         var externalIds = await FetchEpisodeExternalIdsAsync(
             tmdbId,
             seasonNumber,
@@ -469,7 +474,12 @@ public class TMDbSerieMetadataProvider : ISerieMetadataProvider, ISearchableMeta
             Runtime = episode.Runtime,
             StillImageUrl = stillUrl,
             ExternalIds = externalIds,
-            PersonRoles = [],
+            // Season payload includes guest stars + crew (not full episode cast). Enough for UI
+            // without a per-episode credits round-trip.
+            PersonRoles = ConvertToPersonRoles(
+                credits: null,
+                guestStars: episode.GuestStars,
+                crew: episode.Crew),
             Ratings = episode.VoteCount > 0
                 ? [new MetadataProviderRating { MetadataProvider = Domain.Enums.MetadataProvider.TMDb, Value = episode.VoteAverage, MinimumValue = 0, MaximumValue = 10, RatingCount = episode.VoteCount }]
                 : []
@@ -653,83 +663,102 @@ public class TMDbSerieMetadataProvider : ISerieMetadataProvider, ISearchableMeta
         return pictures;
     }
 
-    private Task<IList<BasePersonRole>> ConvertToPersonRolesAsync(Credits? credits, string language, CancellationToken cancellationToken)
+    private IList<BasePersonRole> ConvertToPersonRoles(
+        Credits? credits,
+        IReadOnlyList<TmdbCast>? guestStars,
+        IReadOnlyList<TmdbCrew>? crew)
     {
         var roles = new List<BasePersonRole>();
-        if (credits is null)
-            return Task.FromResult<IList<BasePersonRole>>(roles);
 
-        foreach (var role in credits.Cast ?? [])
-        {
-            if (string.IsNullOrWhiteSpace(role.Name))
-                continue;
+        foreach (var role in credits?.Cast ?? [])
+            TryAddActor(roles, role);
 
-            var actor = new Actor
-            {
-                Order = role.Order,
-                CharacterName = role.Character ?? string.Empty,
-                ExternalIds =
-                [
-                    new ExternalId { ProviderName = "tmdb", Value = role.CreditId ?? $"{role.Id}:{role.Order}:{role.Character}" }
-                ],
-                Person = new Person
-                {
-                    Name = role.Name,
-                    ExternalIds = [new ExternalId { ProviderName = "tmdb", Value = role.Id.ToString() }]
-                }
-            };
+        var guests = guestStars;
+        if (credits is CreditsWithGuestStars creditsWithGuests && creditsWithGuests.GuestStars is { Count: > 0 })
+            guests = creditsWithGuests.GuestStars;
 
-            if (!string.IsNullOrEmpty(role.ProfilePath))
-            {
-                var uri = _tmdbClient.GetImageUrl("original", role.ProfilePath, true);
-                if (uri is not null)
-                {
-                    actor.PortraitPicture = new MetadataPicture { OriginalRemoteUri = uri, Type = MetadataPictureType.Portrait };
-                    actor.PortraitPicture.AddDomainEvent(new MetadataPictureCreatedEvent(actor.PortraitPicture));
-                }
-            }
+        foreach (var role in guests ?? [])
+            TryAddActor(roles, role);
 
-            roles.Add(actor);
-        }
+        foreach (var role in credits?.Crew ?? [])
+            TryAddCrew(roles, role);
 
-        foreach (var role in credits.Crew ?? [])
-        {
-            if (string.IsNullOrWhiteSpace(role.Name)
-                || role.Department is null
-                || role.Job is null
-                || !_wantedCrewRoles.Contains((role.Department, role.Job)))
-                continue;
-
-            var crewMember = new CrewMember
-            {
-                Department = role.Department,
-                Job = role.Job,
-                ExternalIds =
-                [
-                    new ExternalId { ProviderName = "tmdb", Value = role.CreditId ?? role.Id.ToString() }
-                ],
-                Person = new Person
-                {
-                    Name = role.Name,
-                    ExternalIds = [new ExternalId { ProviderName = "tmdb", Value = role.Id.ToString() }]
-                }
-            };
-
-            if (!string.IsNullOrEmpty(role.ProfilePath))
-            {
-                var uri = _tmdbClient.GetImageUrl("original", role.ProfilePath, true);
-                if (uri is not null)
-                {
-                    crewMember.PortraitPicture = new MetadataPicture { OriginalRemoteUri = uri, Type = MetadataPictureType.Portrait };
-                    crewMember.PortraitPicture.AddDomainEvent(new MetadataPictureCreatedEvent(crewMember.PortraitPicture));
-                }
-            }
-
-            roles.Add(crewMember);
-        }
+        foreach (var role in crew ?? [])
+            TryAddCrew(roles, role);
 
         PersonRoleImportHelper.DedupByTmdbCreditId(roles);
-        return Task.FromResult<IList<BasePersonRole>>(roles);
+        return roles;
+    }
+
+    private void TryAddActor(ICollection<BasePersonRole> roles, TmdbCast role)
+    {
+        if (string.IsNullOrWhiteSpace(role.Name))
+            return;
+
+        var actor = new Actor
+        {
+            Order = role.Order,
+            CharacterName = role.Character ?? string.Empty,
+            ExternalIds =
+            [
+                new ExternalId { ProviderName = "tmdb", Value = role.CreditId ?? $"{role.Id}:{role.Order}:{role.Character}" }
+            ],
+            Person = new Person
+            {
+                Name = role.Name,
+                ExternalIds = [new ExternalId { ProviderName = "tmdb", Value = role.Id.ToString() }]
+            }
+        };
+
+        if (!string.IsNullOrEmpty(role.ProfilePath))
+        {
+            var uri = _tmdbClient.GetImageUrl("original", role.ProfilePath, true);
+            if (uri is not null)
+            {
+                actor.PortraitPicture = new MetadataPicture { OriginalRemoteUri = uri, Type = MetadataPictureType.Portrait };
+                actor.PortraitPicture.AddDomainEvent(new MetadataPictureCreatedEvent(actor.PortraitPicture));
+            }
+        }
+
+        roles.Add(actor);
+    }
+
+    private void TryAddCrew(ICollection<BasePersonRole> roles, TmdbCrew role)
+    {
+        if (string.IsNullOrWhiteSpace(role.Name)
+            || role.Department is null
+            || role.Job is null
+            || !_wantedCrewRoles.Contains((role.Department, role.Job)))
+        {
+            return;
+        }
+
+        var crewMember = new CrewMember
+        {
+            Department = role.Department,
+            Job = role.Job,
+            ExternalIds =
+            [
+                new ExternalId { ProviderName = "tmdb", Value = role.CreditId ?? role.Id.ToString() }
+            ],
+            Person = new Person
+            {
+                Name = role.Name,
+                ExternalIds = [new ExternalId { ProviderName = "tmdb", Value = role.Id.ToString() }]
+            }
+        };
+
+        if (!string.IsNullOrEmpty(role.ProfilePath))
+        {
+            var uri = _tmdbClient.GetImageUrl("original", role.ProfilePath, true);
+            if (uri is not null)
+            {
+                crewMember.PortraitPicture = new MetadataPicture { OriginalRemoteUri = uri, Type = MetadataPictureType.Portrait };
+                crewMember.PortraitPicture.AddDomainEvent(new MetadataPictureCreatedEvent(crewMember.PortraitPicture));
+            }
+        }
+
+        roles.Add(crewMember);
     }
 
     private Person ConvertToPerson(TMDbLib.Objects.People.Person tmdbPerson)

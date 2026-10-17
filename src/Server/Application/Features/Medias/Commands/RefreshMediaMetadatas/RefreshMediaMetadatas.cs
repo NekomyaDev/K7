@@ -610,17 +610,16 @@ public class RefreshMediaMetadatasCommandHandler : IRequestHandler<RefreshMediaM
                 ExternalEpisodeMetadata? episodeMetadata = null;
                 try
                 {
-                    episodeMetadata = await metadataProvider.TryBuildEpisodeMetadataFromCatalogAsync(
+                    episodeMetadata = await ResolveEpisodeMetadataAsync(
+                        metadataProvider,
                         request.MetadataProviderExternalId,
                         season.SeasonNumber,
                         episode.EpisodeNumber,
                         request.Language,
                         request.FallbackLanguage,
+                        episode,
+                        request.Incremental,
                         cancellationToken);
-
-                    episodeMetadata ??= await metadataProvider.FetchEpisodeMetadataAsync(
-                        request.MetadataProviderExternalId, season.SeasonNumber, episode.EpisodeNumber,
-                        request.Language, cancellationToken, request.FallbackLanguage);
                 }
                 catch (InvalidOperationException ex)
                 {
@@ -639,21 +638,16 @@ public class RefreshMediaMetadatasCommandHandler : IRequestHandler<RefreshMediaM
                 {
                     try
                     {
-                        episodeMetadata = await enrichmentProvider.TryBuildEpisodeMetadataFromCatalogAsync(
+                        episodeMetadata = await ResolveEpisodeMetadataAsync(
+                            enrichmentProvider,
                             enrichmentExternalId,
                             season.SeasonNumber,
                             episode.EpisodeNumber,
                             request.Language,
                             request.FallbackLanguage,
+                            episode,
+                            request.Incremental,
                             cancellationToken);
-
-                        episodeMetadata ??= await enrichmentProvider.FetchEpisodeMetadataAsync(
-                            enrichmentExternalId,
-                            season.SeasonNumber,
-                            episode.EpisodeNumber,
-                            request.Language,
-                            cancellationToken,
-                            request.FallbackLanguage);
                     }
                     catch (InvalidOperationException ex)
                     {
@@ -1014,10 +1008,13 @@ public class RefreshMediaMetadatasCommandHandler : IRequestHandler<RefreshMediaM
 
     private async Task SyncArtistMembersAsync(MusicArtist artist, IReadOnlyList<ExternalMusicArtistMember>? members, string language, CancellationToken cancellationToken)
     {
+        // MusicBrainz emits one "member of band" relation per instrument or period.
+        DedupeArtistMembers(artist);
         if (members is not { Count: > 0 }) return;
-        if (artist.PersonRoles.Count > 0) return;
+        if (artist.PersonRoles.OfType<MusicArtistMember>().Any()) return;
 
-        foreach (var member in members)
+        var addedPersonIds = new HashSet<Guid>();
+        foreach (var member in CollapseArtistMembers(members))
         {
             Person? person = null;
             var isNewPerson = false;
@@ -1049,6 +1046,9 @@ public class RefreshMediaMetadatasCommandHandler : IRequestHandler<RefreshMediaM
             {
                 person.ExternalIds.Add(new ExternalId { ProviderName = "musicbrainz", Value = member.MusicBrainzArtistId, PersonId = person.Id });
             }
+
+            if (!addedPersonIds.Add(person.Id))
+                continue;
 
             var role = new MusicArtistMember
             {
@@ -1082,6 +1082,52 @@ public class RefreshMediaMetadatasCommandHandler : IRequestHandler<RefreshMediaM
                 }, cancellationToken);
             }
         }
+    }
+
+    private void DedupeArtistMembers(MusicArtist artist)
+    {
+        var kept = new Dictionary<Guid, MusicArtistMember>();
+        foreach (var role in artist.PersonRoles.OfType<MusicArtistMember>().ToList())
+        {
+            if (!kept.TryGetValue(role.PersonId, out var existing))
+            {
+                kept[role.PersonId] = role;
+                continue;
+            }
+
+            existing.Role = MergeRoles(existing.Role, role.Role);
+            if (role.IsActive)
+                existing.IsActive = true;
+
+            artist.PersonRoles.Remove(role);
+            _context.PersonRoles.Remove(role);
+        }
+    }
+
+    private static List<ExternalMusicArtistMember> CollapseArtistMembers(IReadOnlyList<ExternalMusicArtistMember> members) =>
+        members
+            .GroupBy(
+                member => !string.IsNullOrWhiteSpace(member.MusicBrainzArtistId)
+                    ? "mb:" + member.MusicBrainzArtistId
+                    : "name:" + member.Name,
+                StringComparer.OrdinalIgnoreCase)
+            .Select(group => new ExternalMusicArtistMember
+            {
+                Name = group.Select(member => member.Name).FirstOrDefault(name => !string.IsNullOrWhiteSpace(name)) ?? "Unknown",
+                MusicBrainzArtistId = group.Select(member => member.MusicBrainzArtistId).FirstOrDefault(id => !string.IsNullOrWhiteSpace(id)),
+                Role = group.Select(member => member.Role).Aggregate(default(string?), MergeRoles),
+                IsActive = group.Any(member => member.IsActive)
+            })
+            .ToList();
+
+    private static string? MergeRoles(string? left, string? right)
+    {
+        var roles = new[] { left, right }
+            .Where(role => !string.IsNullOrWhiteSpace(role))
+            .SelectMany(role => role!.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        return roles.Count == 0 ? null : string.Join(", ", roles);
     }
 
     private async Task QueueEnrichSerieTmdbSupplementalAsync(
@@ -1143,6 +1189,91 @@ public class RefreshMediaMetadatasCommandHandler : IRequestHandler<RefreshMediaM
             TriggeredBy = BackgroundTaskTriggeredBy.System,
             MaxAttempts = 3
         }, cancellationToken);
+    }
+
+    private static async Task<ExternalEpisodeMetadata?> ResolveEpisodeMetadataAsync(
+        ISerieMetadataProvider provider,
+        string providerId,
+        int seasonNumber,
+        int episodeNumber,
+        string language,
+        string? fallbackLanguage,
+        SerieEpisode episode,
+        bool incremental,
+        CancellationToken cancellationToken)
+    {
+        var catalogMetadata = await provider.TryBuildEpisodeMetadataFromCatalogAsync(
+            providerId,
+            seasonNumber,
+            episodeNumber,
+            language,
+            fallbackLanguage,
+            cancellationToken);
+
+        if (catalogMetadata is null)
+        {
+            return await provider.FetchEpisodeMetadataAsync(
+                providerId,
+                seasonNumber,
+                episodeNumber,
+                language,
+                cancellationToken,
+                fallbackLanguage);
+        }
+
+        // Catalog builds may omit cast. Fall back to a full episode fetch when roles are still empty.
+        var needsCredits = !episode.IsFieldLocked(nameof(SerieEpisode.PersonRoles))
+            && catalogMetadata.PersonRoles.Count == 0
+            && (!incremental || episode.PersonRoles.Count == 0);
+
+        if (!needsCredits)
+            return catalogMetadata;
+
+        var fullEpisodeMetadata = await provider.FetchEpisodeMetadataAsync(
+            providerId,
+            seasonNumber,
+            episodeNumber,
+            language,
+            cancellationToken,
+            fallbackLanguage);
+
+        if (fullEpisodeMetadata is null)
+            return catalogMetadata;
+
+        if (fullEpisodeMetadata.PersonRoles.Count > 0)
+        {
+            catalogMetadata.PersonRoles.Clear();
+            foreach (var role in fullEpisodeMetadata.PersonRoles)
+                catalogMetadata.PersonRoles.Add(role);
+        }
+
+        if (catalogMetadata.ExternalIds.Count == 0 && fullEpisodeMetadata.ExternalIds.Count > 0)
+        {
+            foreach (var externalId in fullEpisodeMetadata.ExternalIds)
+                catalogMetadata.ExternalIds.Add(externalId);
+        }
+
+        if (string.IsNullOrWhiteSpace(catalogMetadata.StillImageUrl)
+            && !string.IsNullOrWhiteSpace(fullEpisodeMetadata.StillImageUrl))
+        {
+            return new ExternalEpisodeMetadata
+            {
+                RemoteId = catalogMetadata.RemoteId ?? fullEpisodeMetadata.RemoteId,
+                EpisodeNumber = catalogMetadata.EpisodeNumber,
+                SeasonNumber = catalogMetadata.SeasonNumber,
+                Title = catalogMetadata.Title ?? fullEpisodeMetadata.Title,
+                SortTitle = catalogMetadata.SortTitle ?? fullEpisodeMetadata.SortTitle,
+                Overview = catalogMetadata.Overview ?? fullEpisodeMetadata.Overview,
+                AirDate = catalogMetadata.AirDate ?? fullEpisodeMetadata.AirDate,
+                Runtime = catalogMetadata.Runtime ?? fullEpisodeMetadata.Runtime,
+                StillImageUrl = fullEpisodeMetadata.StillImageUrl,
+                ExternalIds = catalogMetadata.ExternalIds,
+                PersonRoles = catalogMetadata.PersonRoles,
+                Ratings = catalogMetadata.Ratings.Count > 0 ? catalogMetadata.Ratings : fullEpisodeMetadata.Ratings
+            };
+        }
+
+        return catalogMetadata;
     }
 
     private async Task ResolvePersonReferencesAsync(IEnumerable<BasePersonRole> roles, CancellationToken cancellationToken)

@@ -96,6 +96,21 @@ public sealed class SerieSupplementalCastEnrichmentService(
         }
     }
 
+    public async Task ApplyEpisodePersonRolesAsync(
+        SerieEpisode episode,
+        IReadOnlyList<BasePersonRole> roles,
+        CancellationToken cancellationToken = default)
+    {
+        if (episode.IsFieldLocked(nameof(SerieEpisode.PersonRoles)) || roles.Count == 0)
+            return;
+
+        await ResolvePersonReferencesAsync(roles, cancellationToken);
+
+        episode.PersonRoles.Clear();
+        foreach (var role in roles)
+            episode.PersonRoles.Add(role);
+    }
+
     private async Task ResolvePersonReferencesAsync(IEnumerable<BasePersonRole> roles, CancellationToken cancellationToken)
     {
         foreach (var role in roles.ToList())

@@ -117,6 +117,7 @@ public class TvdbSerieMetadataProviderEpisodeLookupTests
         metadata.Should().NotBeNull();
         metadata!.Title.Should().Be("The Day I Became a Shinigami");
         metadata.Overview.Should().Be("Ichigo becomes a substitute shinigami.");
+        metadata.PersonRoles.Should().ContainSingle(r => r.Person.Name == "Morita Masakazu");
         handler.RequestedPaths.Should().Contain(p => p.Contains("/episodes/default/fra", StringComparison.Ordinal));
         handler.RequestedPaths.Should().Contain(p => p.Contains("/episodes/default/eng", StringComparison.Ordinal));
     }
@@ -276,6 +277,31 @@ public class TvdbSerieMetadataProviderEpisodeLookupTests
                     return Task.FromResult(LocalizedEpisodes("The Day I Became a Shinigami", "Ichigo becomes a substitute shinigami."));
 
                 return Task.FromResult(LocalizedEpisodes("死神になっちゃった日", "死神になった日"));
+            }
+
+            if (path.Contains("/episodes/1/extended", StringComparison.Ordinal))
+            {
+                return Task.FromResult(JsonResponse(
+                    """
+                    {
+                      "status": "success",
+                      "data": {
+                        "id": 1,
+                        "seriesId": 79525,
+                        "seasonNumber": 1,
+                        "number": 1,
+                        "characters": [
+                          {
+                            "id": 10,
+                            "peopleId": 20,
+                            "name": "Kurosaki Ichigo",
+                            "personName": "Morita Masakazu",
+                            "sort": 1
+                          }
+                        ]
+                      }
+                    }
+                    """));
             }
 
             if (path.Contains("/translations/", StringComparison.Ordinal))

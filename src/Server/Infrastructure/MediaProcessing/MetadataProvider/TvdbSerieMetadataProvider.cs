@@ -362,12 +362,14 @@ public class TvdbSerieMetadataProvider : ISerieMetadataProvider, ISearchableMeta
             cancellationToken);
         var stillUrl = TvdbImageUrlHelper.BuildImageUrl(episodeRef.Image);
 
-        // Catalog episode list omits remotes (imdb/tmdb). Extended fetch is needed for scrobbling.
+        // Catalog episode list omits remotes (imdb/tmdb) and characters. Extended fetch covers both.
         IReadOnlyList<TvdbRemoteId>? remoteIds = null;
+        IList<BasePersonRole> personRoles = [];
         try
         {
             var extended = await _apiClient.GetEpisodeExtendedAsync(episodeRef.Id, cancellationToken);
             remoteIds = extended?.RemoteIds;
+            personRoles = MapCharactersToPersonRoles(extended?.Characters);
             if (string.IsNullOrEmpty(stillUrl))
                 stillUrl = TvdbImageUrlHelper.BuildImageUrl(extended?.Image);
         }
@@ -392,7 +394,7 @@ public class TvdbSerieMetadataProvider : ISerieMetadataProvider, ISearchableMeta
             Runtime = episodeRef.Runtime,
             StillImageUrl = stillUrl,
             ExternalIds = BuildExternalIds(episodeRef.Id.ToString(), remoteIds),
-            PersonRoles = []
+            PersonRoles = personRoles
         };
     }
 

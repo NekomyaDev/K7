@@ -3,7 +3,9 @@ using K7.Server.Application.Features.Medias.Services;
 using K7.Server.Application.Features.MetadataPictures.Services;
 using K7.Server.Domain.Entities;
 using K7.Server.Domain.Entities.Medias;
+using K7.Server.Domain.Entities.Metadatas;
 using K7.Server.Domain.Entities.Metadatas.External;
+using K7.Server.Domain.Entities.Metadatas.PersonRoles;
 using K7.Server.Domain.Enums;
 using K7.Server.Domain.Interfaces;
 using K7.Server.Infrastructure.Database.Context.Data;
@@ -253,6 +255,184 @@ public class RefreshMediaMetadatasCommandHandlerSerieIncrementalTests
         await _serieProvider.Received(1).FetchSeasonMetadataAsync(
             Arg.Any<string>(),
             2,
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>(),
+            Arg.Any<string?>());
+    }
+
+    [Test]
+    public async Task Handle_ShouldFetchEpisodeCredits_WhenCatalogOmitsPersonRoles()
+    {
+        var (serie, _) = await SeedSerieWithEnrichedAndNewEpisodeAsync();
+
+        _serieProvider.FetchSerieMetadataAsync(
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<CancellationToken>(),
+                Arg.Any<string?>())
+            .Returns(new ExternalSerieMetadata { Title = "Cool Show", Status = "Ended" });
+
+        _serieProvider.FetchSeasonMetadataAsync(
+                Arg.Any<string>(),
+                Arg.Any<int>(),
+                Arg.Any<string>(),
+                Arg.Any<CancellationToken>(),
+                Arg.Any<string?>())
+            .Returns(call => new ExternalSeasonMetadata
+            {
+                SeasonNumber = call.ArgAt<int>(1),
+                Title = $"Season {call.ArgAt<int>(1)}"
+            });
+
+        _serieProvider.TryBuildEpisodeMetadataFromCatalogAsync(
+                Arg.Any<string>(),
+                Arg.Any<int>(),
+                Arg.Any<int>(),
+                Arg.Any<string>(),
+                Arg.Any<string?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(call => new ExternalEpisodeMetadata
+            {
+                SeasonNumber = call.ArgAt<int>(1),
+                EpisodeNumber = call.ArgAt<int>(2),
+                Title = $"Catalog S{call.ArgAt<int>(1)}E{call.ArgAt<int>(2)}",
+                PersonRoles = []
+            });
+
+        _serieProvider.FetchEpisodeMetadataAsync(
+                Arg.Any<string>(),
+                Arg.Any<int>(),
+                Arg.Any<int>(),
+                Arg.Any<string>(),
+                Arg.Any<CancellationToken>(),
+                Arg.Any<string?>())
+            .Returns(call => new ExternalEpisodeMetadata
+            {
+                SeasonNumber = call.ArgAt<int>(1),
+                EpisodeNumber = call.ArgAt<int>(2),
+                Title = $"Full S{call.ArgAt<int>(1)}E{call.ArgAt<int>(2)}",
+                PersonRoles =
+                [
+                    new Actor
+                    {
+                        CharacterName = "Host",
+                        Order = 0,
+                        Person = new Person
+                        {
+                            Name = "Guest Star",
+                            ExternalIds = [new ExternalId { ProviderName = "tmdb", Value = "99" }]
+                        }
+                    }
+                ]
+            });
+
+        await _handler.Handle(new RefreshMediaMetadatasCommand
+        {
+            MediaId = serie.Id,
+            MetadataProviderExternalId = "tmdb-1",
+            MetadataProviderName = "tmdb",
+            Language = "fr",
+            FallbackLanguage = "en"
+        }, CancellationToken.None);
+
+        var refreshed = await _context.Medias.OfType<Serie>()
+            .Include(s => s.Seasons)
+                .ThenInclude(s => s.Episodes)
+                    .ThenInclude(e => e.PersonRoles)
+                        .ThenInclude(r => r.Person)
+            .SingleAsync(s => s.Id == serie.Id);
+
+        var episode = refreshed.Seasons.Single(s => s.SeasonNumber == 1)
+            .Episodes.Single(e => e.EpisodeNumber == 1);
+        episode.Title.Should().Be("Catalog S1E1");
+        episode.PersonRoles.Should().ContainSingle();
+        episode.PersonRoles.Single().Person.Name.Should().Be("Guest Star");
+
+        await _serieProvider.Received().FetchEpisodeMetadataAsync(
+            Arg.Any<string>(),
+            1,
+            1,
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>(),
+            Arg.Any<string?>());
+    }
+
+    [Test]
+    public async Task Handle_ShouldNotFetchEpisodeCredits_WhenCatalogIncludesPersonRoles()
+    {
+        var (serie, _) = await SeedSerieWithEnrichedAndNewEpisodeAsync();
+
+        _serieProvider.FetchSerieMetadataAsync(
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<CancellationToken>(),
+                Arg.Any<string?>())
+            .Returns(new ExternalSerieMetadata { Title = "Cool Show", Status = "Ended" });
+
+        _serieProvider.FetchSeasonMetadataAsync(
+                Arg.Any<string>(),
+                Arg.Any<int>(),
+                Arg.Any<string>(),
+                Arg.Any<CancellationToken>(),
+                Arg.Any<string?>())
+            .Returns(call => new ExternalSeasonMetadata
+            {
+                SeasonNumber = call.ArgAt<int>(1),
+                Title = $"Season {call.ArgAt<int>(1)}"
+            });
+
+        _serieProvider.TryBuildEpisodeMetadataFromCatalogAsync(
+                Arg.Any<string>(),
+                Arg.Any<int>(),
+                Arg.Any<int>(),
+                Arg.Any<string>(),
+                Arg.Any<string?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(call => new ExternalEpisodeMetadata
+            {
+                SeasonNumber = call.ArgAt<int>(1),
+                EpisodeNumber = call.ArgAt<int>(2),
+                Title = $"Catalog S{call.ArgAt<int>(1)}E{call.ArgAt<int>(2)}",
+                PersonRoles =
+                [
+                    new Actor
+                    {
+                        CharacterName = "Cameo",
+                        Order = 1,
+                        Person = new Person
+                        {
+                            Name = "Catalog Guest",
+                            ExternalIds = [new ExternalId { ProviderName = "tmdb", Value = "77" }]
+                        }
+                    }
+                ]
+            });
+
+        await _handler.Handle(new RefreshMediaMetadatasCommand
+        {
+            MediaId = serie.Id,
+            MetadataProviderExternalId = "tmdb-1",
+            MetadataProviderName = "tmdb",
+            Language = "fr",
+            FallbackLanguage = "en"
+        }, CancellationToken.None);
+
+        var refreshed = await _context.Medias.OfType<Serie>()
+            .Include(s => s.Seasons)
+                .ThenInclude(s => s.Episodes)
+                    .ThenInclude(e => e.PersonRoles)
+                        .ThenInclude(r => r.Person)
+            .SingleAsync(s => s.Id == serie.Id);
+
+        var episode = refreshed.Seasons.Single(s => s.SeasonNumber == 1)
+            .Episodes.Single(e => e.EpisodeNumber == 1);
+        episode.PersonRoles.Should().ContainSingle();
+        episode.PersonRoles.Single().Person.Name.Should().Be("Catalog Guest");
+
+        await _serieProvider.DidNotReceive().FetchEpisodeMetadataAsync(
+            Arg.Any<string>(),
+            Arg.Any<int>(),
+            Arg.Any<int>(),
             Arg.Any<string>(),
             Arg.Any<CancellationToken>(),
             Arg.Any<string?>());

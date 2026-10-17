@@ -96,8 +96,10 @@ public class EnrichSerieTmdbSupplementalCommandHandler(
                 var needsOverview = string.IsNullOrWhiteSpace(episode.Overview);
                 var needsStill = NeedsHdEpisodeStill(episode);
                 var needsRatings = !episode.Ratings.OfType<MetadataProviderRating>().Any();
+                var needsCast = !episode.IsFieldLocked(nameof(SerieEpisode.PersonRoles))
+                    && episode.PersonRoles.Count == 0;
 
-                if (!needsTitle && !needsOverview && !needsStill && !needsRatings)
+                if (!needsTitle && !needsOverview && !needsStill && !needsRatings && !needsCast)
                     continue;
 
                 var supplementalMetadata = await SupplementalEpisodeMetadataResolver.TryFetchTmdbEpisodeMetadataAsync(
@@ -134,6 +136,14 @@ public class EnrichSerieTmdbSupplementalCommandHandler(
                     SupplementalEpisodeMetadataResolver.MergeMetadataProviderRatings(
                         episode,
                         supplementalMetadata.Ratings);
+                }
+
+                if (needsCast && supplementalMetadata.PersonRoles.Count > 0)
+                {
+                    await _supplementalCastEnrichmentService.ApplyEpisodePersonRolesAsync(
+                        episode,
+                        supplementalMetadata.PersonRoles.ToList(),
+                        cancellationToken);
                 }
 
                 SupplementalEpisodeMetadataResolver.MergeSupplementalExternalIds(
