@@ -360,7 +360,7 @@ public class BulkCreateMediasCommandHandler(
             ? new HashSet<Guid>()
             : (await context.Medias.OfType<MusicTrack>()
                 .Where(t => existingAlbumIds.Contains(t.AlbumId)
-                    && t.IndexedFiles.Any())
+                    && (t.IndexedFiles.Any() || t.RemoteIndexedFiles.Any()))
                 .Select(t => t.AlbumId)
                 .Distinct()
                 .ToListAsync(cancellationToken))
@@ -385,14 +385,34 @@ public class BulkCreateMediasCommandHandler(
         }
 
         var albumCache = new Dictionary<string, MusicAlbum>(StringComparer.OrdinalIgnoreCase);
+        var graftAlbumKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var skippedAlbumKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var newAlbums = new List<MusicAlbum>();
 
         foreach (var group in musicGroups)
         {
             var albumName = group.Items[0].AlbumName ?? "Unknown Album";
-            var albumKey = MediaIdentityKeys.NormalizeKey(group.Items[0].ArtistName ?? "", albumName);
+            var artistName = group.Items[0].ArtistName ?? "";
+            var albumKey = MediaIdentityKeys.NormalizeKey(artistName, albumName);
 
-            if (albumCache.ContainsKey(albumKey)) continue;
+            if (albumCache.ContainsKey(albumKey) || skippedAlbumKeys.Contains(albumKey)) continue;
+
+            var playableMatches = FindPlayableAlbums(
+                existingAlbumsList, albumsWithPlayableTracks, artistCache, albumName, artistName);
+            if (playableMatches.Count == 1)
+            {
+                // Stats for a track that already has a file land on that track. No "(imported)" shell.
+                albumCache[albumKey] = playableMatches[0];
+                graftAlbumKeys.Add(albumKey);
+                continue;
+            }
+
+            if (playableMatches.Count > 1)
+            {
+                // Ambiguous editions (deluxe vs standard). Do not create another shell.
+                skippedAlbumKeys.Add(albumKey);
+                continue;
+            }
 
             if (existingAlbums.TryGetValue(albumKey, out var existing))
             {
@@ -400,7 +420,8 @@ public class BulkCreateMediasCommandHandler(
             }
             else
             {
-                // Keep virtual imports off playable albums: use a dedicated imported shell album.
+                // Another playable album already uses this title (different artist).
+                // Keep the new virtual tracks off it.
                 var playableConflict = existingAlbumsList.Any(a =>
                     string.Equals(a.Title, albumName, StringComparison.OrdinalIgnoreCase)
                     && albumsWithPlayableTracks.Contains(a.Id));
@@ -430,6 +451,7 @@ public class BulkCreateMediasCommandHandler(
             var albumKey = MediaIdentityKeys.NormalizeKey(artistName ?? "", group.Items[0].AlbumName ?? "Unknown Album");
 
             if (artistName is null || !artistCache.TryGetValue(artistName, out var artist)) continue;
+            if (skippedAlbumKeys.Contains(albumKey)) continue;
             if (!albumCache.TryGetValue(albumKey, out var album)) continue;
             if (album.ArtistId == artist.Id) continue;
 
@@ -438,6 +460,18 @@ public class BulkCreateMediasCommandHandler(
 
         await context.SaveChangesAsync(cancellationToken);
 
+        var graftAlbumIds = graftAlbumKeys.Select(key => albumCache[key].Id).ToList();
+        List<GraftTrack> graftTracks = [];
+        if (graftAlbumIds.Count > 0)
+        {
+            graftTracks = await context.Medias.OfType<MusicTrack>()
+                .AsNoTracking()
+                .Where(t => graftAlbumIds.Contains(t.AlbumId)
+                    && (t.IndexedFiles.Any() || t.RemoteIndexedFiles.Any()))
+                .Select(t => new GraftTrack(t.Id, t.AlbumId, t.Title, t.Artist != null ? t.Artist.Title : null))
+                .ToListAsync(cancellationToken);
+        }
+
         // 4. Create tracks in batches and link artists
         var pending = new List<(MusicTrack Entity, BatchGroup Group)>();
 
@@ -445,7 +479,28 @@ public class BulkCreateMediasCommandHandler(
         {
             var representative = group.Items[0];
             var albumKey = MediaIdentityKeys.NormalizeKey(representative.ArtistName ?? "", representative.AlbumName ?? "Unknown Album");
-            var album = albumCache[albumKey];
+            if (skippedAlbumKeys.Contains(albumKey) || !albumCache.TryGetValue(albumKey, out var album))
+                continue;
+
+            if (graftAlbumKeys.Contains(albumKey))
+            {
+                var hits = graftTracks
+                    .Where(t => t.AlbumId == album.Id
+                        && ImportedMusicShellReattachHelper.TitlesMatch(
+                            representative.Title, t.Title, representative.ArtistName, t.ArtistName))
+                    .Select(t => t.Id)
+                    .Distinct()
+                    .ToList();
+                if (hits.Count == 1)
+                {
+                    foreach (var item in group.Items)
+                        resultMap.TryAdd(item.Key, (hits[0], false));
+                }
+
+                // No unique playable title match: skip. Do not create a virtual track on a playable album.
+                continue;
+            }
+
             var title = MediaIdentityKeys.StripTrackEditionSuffix(
                 MediaIdentityKeys.StripRedundantArtistFromTitle(representative.Title, representative.ArtistName));
 
@@ -875,6 +930,25 @@ public class BulkCreateMediasCommandHandler(
             }
         }
     }
+
+    private static List<MusicAlbum> FindPlayableAlbums(
+        List<MusicAlbum> existingAlbums,
+        HashSet<Guid> albumsWithPlayableTracks,
+        Dictionary<string, Domain.Entities.Medias.MusicArtist> artistCache,
+        string albumName,
+        string artistName)
+    {
+        if (artistName.Length == 0 || !artistCache.TryGetValue(artistName, out var artist))
+            return [];
+
+        return existingAlbums
+            .Where(a => albumsWithPlayableTracks.Contains(a.Id)
+                && a.ArtistId == artist.Id
+                && string.Equals(a.Title, albumName, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+    }
+
+    private sealed record GraftTrack(Guid Id, Guid AlbumId, string? Title, string? ArtistName);
 
     private static string? ResolveSortTitle(BulkCreateMediasRequest.BulkCreateMediaItem item) =>
         item.SortTitle ?? MediaSortTitleHelper.Compute(item.Title);

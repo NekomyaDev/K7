@@ -1359,6 +1359,70 @@ public class BulkCreateMediasCommandHandlerTests
         return episodeEntity;
     }
 
+    [Test]
+    public async Task Handle_ShouldGraftOntoPlayableTrack_WhenSameArtistAlbumExists()
+    {
+        var trackId = SeedPlayableTrack("Alors-on-danse", "Stromae", "Cheese");
+
+        var response = await _handler.Handle(new BulkCreateMediasCommand
+        {
+            Items =
+            [
+                new BulkCreateMediasRequest.BulkCreateMediaItem
+                {
+                    Key = "hit",
+                    MediaType = "music",
+                    Title = "Alors on danse",
+                    ArtistName = "Stromae",
+                    AlbumName = "Cheese",
+                    ExternalIds = new Dictionary<string, string> { ["spotify"] = "spotify-hit" }
+                },
+                new BulkCreateMediasRequest.BulkCreateMediaItem
+                {
+                    Key = "miss",
+                    MediaType = "music",
+                    Title = "Unreleased Bonus",
+                    ArtistName = "Stromae",
+                    AlbumName = "Cheese",
+                    ExternalIds = new Dictionary<string, string> { ["spotify"] = "spotify-miss" }
+                }
+            ]
+        }, CancellationToken.None);
+
+        response.Results.Should().ContainSingle();
+        response.Results[0].Key.Should().Be("hit");
+        response.Results[0].MediaId.Should().Be(trackId);
+        response.Results[0].WasCreated.Should().BeFalse();
+        (await _context.Medias.OfType<MusicAlbum>().CountAsync(a => a.Title != null && a.Title.Contains("imported"))).Should().Be(0);
+        (await _context.Medias.OfType<MusicTrack>().CountAsync()).Should().Be(1);
+    }
+
+    [Test]
+    public async Task Handle_ShouldKeepImportedShell_WhenPlayableAlbumBelongsToAnotherArtist()
+    {
+        SeedPlayableTrack("Alors on danse", "Stromae", "Cheese");
+
+        var response = await _handler.Handle(new BulkCreateMediasCommand
+        {
+            Items =
+            [
+                new BulkCreateMediasRequest.BulkCreateMediaItem
+                {
+                    Key = "other",
+                    MediaType = "music",
+                    Title = "Other Song",
+                    ArtistName = "Someone Else",
+                    AlbumName = "Cheese",
+                    ExternalIds = new Dictionary<string, string> { ["spotify"] = "spotify-other" }
+                }
+            ]
+        }, CancellationToken.None);
+
+        response.Results.Should().ContainSingle();
+        response.Results[0].WasCreated.Should().BeTrue();
+        (await _context.Medias.OfType<MusicAlbum>().CountAsync(a => a.Title == "Cheese (imported)")).Should().Be(1);
+    }
+
     private Guid SeedVirtualTrack(string title, string artistName, string albumName)
     {
         var artistId = Guid.NewGuid();
