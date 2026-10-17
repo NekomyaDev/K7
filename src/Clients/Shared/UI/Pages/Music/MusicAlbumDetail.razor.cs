@@ -120,7 +120,8 @@ public partial class MusicAlbumDetail : IDisposable
             var artistName = album.ArtistName;
 
             _tracks = (album.Tracks ?? [])
-                .OrderBy(t => t.TrackNumber)
+                .OrderBy(t => t.DiscNumber is null or < 1 ? 1 : t.DiscNumber.Value)
+                .ThenBy(t => t.TrackNumber)
                 .Select(t =>
                 {
                     var guestCredits = (t.ArtistCredits ?? [])
@@ -142,7 +143,7 @@ public partial class MusicAlbumDetail : IDisposable
                         CoverUrl = _coverUrl,
                         CoverDominantColor = _coverDominantColor,
                         Duration = t.Duration ?? 0,
-                        DiscNumber = 1,
+                        DiscNumber = t.DiscNumber is null or < 1 ? 1 : t.DiscNumber.Value,
                         UserRating = t.UserRating,
                         LoudnessLufs = t.LoudnessLufs,
                         FadeInDuration = t.FadeInDuration,

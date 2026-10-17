@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.JSInterop;
@@ -290,12 +291,7 @@ public partial class K7TextField<TValue> : IAsyncDisposable
         Validate(val);
     }
 
-    private TValue? Convert(string? raw)
-    {
-        if (raw is null) return default;
-        try { return (TValue)System.Convert.ChangeType(raw, typeof(TValue)); }
-        catch { return default; }
-    }
+    private TValue? Convert(string? raw) => K7TextFieldConvert.To<TValue>(raw);
 
     private void Validate(TValue? val)
     {

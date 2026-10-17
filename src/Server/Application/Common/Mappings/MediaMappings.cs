@@ -261,6 +261,7 @@ public static class MediaMappings
                     Pictures = MapPictures(track.Album?.Pictures ?? domain.Pictures),
                     AlbumId = track.AlbumId,
                     TrackNumber = track.TrackNumber,
+                    DiscNumber = track.DiscNumber,
                     IndexedFileId = domain.IndexedFiles.FirstOrDefault()?.Id,
                     RemoteIndexedFileId = domain.RemoteIndexedFiles.FirstOrDefault()?.Id,
                     Duration = (domain.IndexedFiles.FirstOrDefault()?.FileMetadata as AudioFileMetadata)?.Duration.TotalSeconds
