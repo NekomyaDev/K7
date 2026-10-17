@@ -286,6 +286,104 @@ public class CreateMediaMusicIdentityTests
             e.ProviderName == "musicbrainz" && e.Value == "jt-mbid");
     }
 
+    [Test]
+    public async Task Handle_ShouldCreateSeparateAlbums_WhenSameTitleInDifferentFolders()
+    {
+        DisableProviderSearch();
+
+        var standardId = Guid.NewGuid();
+        var deluxeId = Guid.NewGuid();
+        _context.IndexedFiles.Add(CreateIndexedFile(
+            standardId, "Wings", "Fire Within", "Birdy", "/music/Birdy/Fire Within/01 - Wings.flac"));
+        _context.IndexedFiles.Add(CreateIndexedFile(
+            deluxeId, "Wings", "Fire Within", "Birdy", "/music/Birdy/Fire Within (Deluxe)/01 - Wings.flac"));
+        await _context.SaveChangesAsync();
+
+        var firstAlbumId = await _handler.Handle(new CreateMediaCommand
+        {
+            MediaType = MediaType.MusicAlbum,
+            LibraryId = _libraryId,
+            IndexedFileIds = [standardId]
+        }, CancellationToken.None);
+
+        var secondAlbumId = await _handler.Handle(new CreateMediaCommand
+        {
+            MediaType = MediaType.MusicAlbum,
+            LibraryId = _libraryId,
+            IndexedFileIds = [deluxeId]
+        }, CancellationToken.None);
+
+        secondAlbumId.Should().NotBe(firstAlbumId);
+        (await _context.Medias.OfType<MusicAlbum>().CountAsync(a => a.Title == "Fire Within")).Should().Be(2);
+    }
+
+    [Test]
+    public async Task Handle_ShouldReuseAlbum_WhenSameFolder()
+    {
+        DisableProviderSearch();
+
+        var firstId = Guid.NewGuid();
+        var secondId = Guid.NewGuid();
+        _context.IndexedFiles.Add(CreateIndexedFile(
+            firstId, "Wings", "Fire Within", "Birdy", "/music/Birdy/Fire Within/01 - Wings.flac"));
+        _context.IndexedFiles.Add(CreateIndexedFile(
+            secondId, "People Help The People", "Fire Within", "Birdy",
+            "/music/Birdy/Fire Within/02 - People Help The People.flac"));
+        await _context.SaveChangesAsync();
+
+        var firstAlbumId = await _handler.Handle(new CreateMediaCommand
+        {
+            MediaType = MediaType.MusicAlbum,
+            LibraryId = _libraryId,
+            IndexedFileIds = [firstId]
+        }, CancellationToken.None);
+
+        var secondAlbumId = await _handler.Handle(new CreateMediaCommand
+        {
+            MediaType = MediaType.MusicAlbum,
+            LibraryId = _libraryId,
+            IndexedFileIds = [secondId]
+        }, CancellationToken.None);
+
+        secondAlbumId.Should().Be(firstAlbumId);
+        (await _context.Medias.OfType<MusicAlbum>().CountAsync(a => a.Title == "Fire Within")).Should().Be(1);
+    }
+
+    [Test]
+    public async Task Handle_ShouldGraftOntoFileLessAlbum_WhenTitleMatches()
+    {
+        DisableProviderSearch();
+
+        var artist = new MusicArtist { Title = "Birdy", SortTitle = "Birdy" };
+        var shell = new MusicAlbum { Title = "Fire Within", Artist = artist };
+        _context.Medias.AddRange(artist, shell);
+        await _context.SaveChangesAsync();
+
+        var fileId = Guid.NewGuid();
+        _context.IndexedFiles.Add(CreateIndexedFile(
+            fileId, "Wings", "Fire Within", "Birdy", "/music/Birdy/Fire Within/01 - Wings.flac"));
+        await _context.SaveChangesAsync();
+
+        var albumId = await _handler.Handle(new CreateMediaCommand
+        {
+            MediaType = MediaType.MusicAlbum,
+            LibraryId = _libraryId,
+            IndexedFileIds = [fileId]
+        }, CancellationToken.None);
+
+        albumId.Should().Be(shell.Id);
+    }
+
+    private void DisableProviderSearch()
+    {
+        _albumProvider.SearchAsync(
+                Arg.Any<MediaIdentification>(),
+                Arg.Any<string?>(),
+                Arg.Any<string?>(),
+                Arg.Any<CancellationToken>())
+            .Returns((string?)null);
+    }
+
     private void AssertAlbumRefreshQueued(Guid albumId, string externalId)
     {
         var calls = _sender.ReceivedCalls()
@@ -299,12 +397,22 @@ public class CreateMediaMusicIdentityTests
             r.MediaId == albumId && r.MetadataProviderExternalId == externalId);
     }
 
-    private IndexedFile CreateIndexedFile(Guid fileId, string title, string album, string artist) =>
-        new()
+    private IndexedFile CreateIndexedFile(Guid fileId, string title, string album, string artist, string? path = null)
+    {
+        var resolvedPath = path ?? $"/music/{album}/01 - {title}.flac";
+        // ParentDirectory is the folder name only (last segment).
+        var normalized = resolvedPath.Replace('\\', '/');
+        var lastSlash = normalized.LastIndexOf('/');
+        var folderName = lastSlash > 0
+            ? normalized[..lastSlash].Split('/').LastOrDefault() ?? album
+            : album;
+
+        return new IndexedFile
         {
             Id = fileId,
             LibraryId = _libraryId,
-            Path = $"/music/{album}/01 - {title}.flac",
+            Path = resolvedPath,
+            ParentDirectory = folderName,
             Name = $"01 - {title}.flac",
             Extension = ".flac",
             Hash = 1,
@@ -318,4 +426,5 @@ public class CreateMediaMusicIdentityTests
                 TrackNumber = 1
             }
         };
+    }
 }

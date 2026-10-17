@@ -664,32 +664,63 @@ public class CreateMediaCommandHandler : IRequestHandler<CreateMediaCommand, Gui
         HashSet<Guid> vacatedAlbumIds)
     {
         var isVirtual = !track.IndexedFiles.Any();
+        var target = track;
+
+        // A playable track already on this album must keep the file. Reparenting a shell
+        // with the same ISRC/recording id would leave two rows for the same song.
         if (isVirtual && track.AlbumId != album.Id)
         {
-            vacatedAlbumIds.Add(track.AlbumId);
-            track.AlbumId = album.Id;
-            track.Album = album;
-            if (!album.Tracks.Any(t => t.Id == track.Id))
-                album.Tracks.Add(track);
+            var localPlayable = FindPlayableTrackOnAlbum(album, trackTitle, trackNumber, tags?.DiscNumber);
+            if (localPlayable is not null)
+            {
+                target = localPlayable;
+                isVirtual = false;
+            }
+            else
+            {
+                vacatedAlbumIds.Add(track.AlbumId);
+                track.AlbumId = album.Id;
+                track.Album = album;
+                if (!album.Tracks.Any(t => t.Id == track.Id))
+                    album.Tracks.Add(track);
+            }
         }
 
-        if (!track.IndexedFiles.Any(f => f.Id == indexedFile.Id))
-            track.IndexedFiles.Add(indexedFile);
+        if (!target.IndexedFiles.Any(f => f.Id == indexedFile.Id))
+            target.IndexedFiles.Add(indexedFile);
 
         if (isVirtual && !string.IsNullOrWhiteSpace(trackTitle))
         {
-            track.Title = trackTitle;
-            track.SortTitle = MediaSortTitleHelper.Compute(trackTitle);
+            target.Title = trackTitle;
+            target.SortTitle = MediaSortTitleHelper.Compute(trackTitle);
         }
 
         if (isVirtual && trackNumber is not null)
-            track.TrackNumber = trackNumber;
+            target.TrackNumber = trackNumber;
 
         if (!string.IsNullOrWhiteSpace(tags?.Isrc))
-            UpsertExternalId(track, "isrc", tags.Isrc);
+            UpsertExternalId(target, "isrc", tags.Isrc);
 
         if (!string.IsNullOrWhiteSpace(tags?.MusicBrainzRecordingId))
-            UpsertExternalId(track, "musicbrainz", tags.MusicBrainzRecordingId);
+            UpsertExternalId(target, "musicbrainz", tags.MusicBrainzRecordingId);
+    }
+
+    private static MusicTrack? FindPlayableTrackOnAlbum(
+        MusicAlbum album,
+        string? trackTitle,
+        int? trackNumber,
+        int? discNumber)
+    {
+        var disc = discNumber is null or < 1 ? 1 : discNumber.Value;
+        return album.Tracks.FirstOrDefault(t =>
+            (t.IndexedFiles.Any() || t.RemoteIndexedFiles.Any())
+            && trackNumber is int number
+            && t.TrackNumber == number
+            && (t.DiscNumber is null or < 1 ? 1 : t.DiscNumber.Value) == disc)
+            ?? album.Tracks.FirstOrDefault(t =>
+                (t.IndexedFiles.Any() || t.RemoteIndexedFiles.Any())
+                && !string.IsNullOrWhiteSpace(trackTitle)
+                && string.Equals(t.Title, trackTitle, StringComparison.OrdinalIgnoreCase));
     }
 
     private static bool UpsertExternalId(BaseMedia media, string providerName, string value)
@@ -975,17 +1006,21 @@ public class CreateMediaCommandHandler : IRequestHandler<CreateMediaCommand, Gui
         DateOnly? yearStart = releaseYear is { } year ? new DateOnly(year.Year, 1, 1) : null;
         DateOnly? yearEnd = releaseYear is { } y ? new DateOnly(y.Year, 12, 31) : null;
 
-        var existingAlbum = await _context.Medias
+        // Same title+artist alone must not merge deluxe/standard folders. Prefer the album that
+        // already has files in this folder, else a file-less shell, else create a new album.
+        var candidates = await _context.Medias
             .OfType<MusicAlbum>()
-            .FirstOrDefaultAsync(a =>
-                a.Title == resolvedAlbumName &&
-                (a.Tracks.Any(t => t.IndexedFiles.Any(f => f.LibraryId == indexedFile.LibraryId))
-                    || !a.Tracks.Any(t => t.IndexedFiles.Any())) &&
-                (artistName == null || (a.Artist != null && a.Artist.Title == artistName)) &&
-                (yearStart == null
+            .Where(a =>
+                a.Title == resolvedAlbumName
+                && (artistName == null || (a.Artist != null && a.Artist.Title == artistName))
+                && (yearStart == null
                     || a.ReleaseDate == null
-                    || (a.ReleaseDate >= yearStart && a.ReleaseDate <= yearEnd)),
-                cancellationToken);
+                    || (a.ReleaseDate >= yearStart && a.ReleaseDate <= yearEnd)))
+            .ToListAsync(cancellationToken);
+
+        var existingAlbum = candidates.Count == 0
+            ? null
+            : await PickExistingAlbumForFolderAsync(candidates, indexedFile, cancellationToken);
 
         if (existingAlbum is not null)
             return (existingAlbum, false);
@@ -1001,6 +1036,73 @@ public class CreateMediaCommandHandler : IRequestHandler<CreateMediaCommand, Gui
         await _context.SaveChangesAsync(cancellationToken);
 
         return (album, true);
+    }
+
+    private async Task<MusicAlbum?> PickExistingAlbumForFolderAsync(
+        IReadOnlyList<MusicAlbum> candidates,
+        IndexedFile indexedFile,
+        CancellationToken cancellationToken)
+    {
+        var candidateIds = candidates.Select(a => a.Id).ToList();
+        var albumsWithFiles = (await _context.Medias
+            .OfType<MusicTrack>()
+            .AsNoTracking()
+            .Where(t => candidateIds.Contains(t.AlbumId)
+                && (t.IndexedFiles.Any() || t.RemoteIndexedFiles.Any()))
+            .Select(t => t.AlbumId)
+            .Distinct()
+            .ToListAsync(cancellationToken))
+            .ToHashSet();
+
+        var folderFiles = await (
+            from track in _context.Medias.OfType<MusicTrack>().AsNoTracking()
+            where candidateIds.Contains(track.AlbumId)
+            join file in _context.IndexedFiles.AsNoTracking() on track.Id equals file.MediaId
+            where file.LibraryId == indexedFile.LibraryId
+            select new { track.AlbumId, file.Path, file.ParentDirectory }
+        ).ToListAsync(cancellationToken);
+
+        var directoryPrefix = AlbumFolderPrefix(indexedFile.Path);
+        var parentDirectory = indexedFile.ParentDirectory;
+
+        foreach (var candidate in candidates)
+        {
+            var files = folderFiles.Where(f => f.AlbumId == candidate.Id).ToList();
+            if (files.Count == 0)
+                continue;
+
+            if (directoryPrefix is not null
+                && files.Any(f => SharesAlbumFolder(f.Path, directoryPrefix)))
+                return candidate;
+
+            if (parentDirectory is not null
+                && files.Any(f => string.Equals(f.ParentDirectory, parentDirectory, StringComparison.OrdinalIgnoreCase)))
+                return candidate;
+        }
+
+        return candidates.FirstOrDefault(a => !albumsWithFiles.Contains(a.Id));
+    }
+
+    private static string? AlbumFolderPrefix(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return null;
+
+        var normalized = path.Replace('\\', '/');
+        var slash = normalized.LastIndexOf('/');
+        if (slash <= 0)
+            return null;
+
+        return normalized[..(slash + 1)];
+    }
+
+    private static bool SharesAlbumFolder(string? filePath, string directoryPrefix)
+    {
+        if (string.IsNullOrWhiteSpace(filePath))
+            return false;
+
+        return filePath.Replace('\\', '/')
+            .StartsWith(directoryPrefix, StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task<Person> FindOrCreatePersonAsync(string name, CancellationToken cancellationToken)

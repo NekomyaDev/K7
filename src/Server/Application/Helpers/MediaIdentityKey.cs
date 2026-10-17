@@ -39,8 +39,9 @@ public static class MediaIdentityKey
 
     private static string BuildAlbumIdentity(MediaIdentification? identification, IndexedFile? primaryFile)
     {
-        // Mirrors FindOrCreateAlbumAsync: album name, artist, year. Album name falls back to the parent
-        // directory exactly like identification does, so tracks of one folder share a key.
+        // Lock key for CreateMedia: album name, artist, year. Album name falls back to the parent
+        // directory like identification does, so tracks of one folder share a key. FindOrCreateAlbum
+        // still refuses to merge two different folders that only share a title.
         var album = Normalize(identification?.AlbumName) ?? Normalize(primaryFile?.ParentDirectory);
         var artist = Normalize(identification?.ArtistName);
         var year = identification?.ReleaseYear?.Year;
