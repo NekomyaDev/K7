@@ -3,6 +3,7 @@ using K7.Server.Application.Helpers;
 using K7.Server.Domain.Entities;
 using K7.Server.Domain.Entities.Medias;
 using K7.Server.Domain.Entities.Metadatas;
+using K7.Server.Domain.Entities.Users;
 using K7.Server.Domain.Entities.Metadatas.PersonRoles;
 using K7.Server.Domain.Enums;
 using K7.Server.Infrastructure.Database.Context.Data;
@@ -159,15 +160,15 @@ public class MergeDuplicateExternalIdsTests
     }
 
     [Test]
-    public async Task Handle_ShouldMoveTracksOntoAlbumWithMoreTracks_AndDropTheDuplicate()
+    public async Task Handle_ShouldMergeMatchingTracks_AndKeepUnmatchedOnSourceAlbum()
     {
         var kept = new MusicAlbum { Id = Guid.NewGuid(), Title = "Album" };
         var duplicate = new MusicAlbum { Id = Guid.NewGuid(), Title = "Album (copy)" };
         var keptTrack = new MusicTrack { Id = Guid.NewGuid(), Title = "One", AlbumId = kept.Id, TrackNumber = 1, DiscNumber = 1 };
         var keptExtra = new MusicTrack { Id = Guid.NewGuid(), Title = "Two", AlbumId = kept.Id, TrackNumber = 2, DiscNumber = 1 };
         var keptThird = new MusicTrack { Id = Guid.NewGuid(), Title = "Three", AlbumId = kept.Id, TrackNumber = 3, DiscNumber = 1 };
-        var colliding = new MusicTrack { Id = Guid.NewGuid(), Title = "One copy", AlbumId = duplicate.Id, TrackNumber = 1, DiscNumber = 1 };
-        var extra = new MusicTrack { Id = Guid.NewGuid(), Title = "Four", AlbumId = duplicate.Id, TrackNumber = 4, DiscNumber = 1 };
+        var colliding = new MusicTrack { Id = Guid.NewGuid(), Title = "One", AlbumId = duplicate.Id, TrackNumber = 1, DiscNumber = 1 };
+        var extra = new MusicTrack { Id = Guid.NewGuid(), Title = "Bonus Deluxe", AlbumId = duplicate.Id, TrackNumber = 4, DiscNumber = 1 };
         _context.Medias.AddRange(kept, duplicate, keptTrack, keptExtra, keptThird, colliding, extra);
         var fileId = AddFile(colliding.Id, "/media/music/one.flac");
         AddExternalId(kept.Id, "musicbrainz", "release-1");
@@ -176,11 +177,56 @@ public class MergeDuplicateExternalIdsTests
 
         var merged = await _handler.Handle(new MergeDuplicateExternalIdsCommand(), CancellationToken.None);
 
-        merged.Should().Be(1);
-        (await _context.Medias.OfType<MusicAlbum>().AnyAsync(a => a.Id == duplicate.Id)).Should().BeFalse();
+        merged.Should().Be(0);
+        (await _context.Medias.OfType<MusicAlbum>().AnyAsync(a => a.Id == duplicate.Id)).Should().BeTrue();
         (await _context.Medias.OfType<MusicTrack>().AnyAsync(t => t.Id == colliding.Id)).Should().BeFalse();
         (await _context.IndexedFiles.SingleAsync(f => f.Id == fileId)).MediaId.Should().Be(keptTrack.Id);
-        (await _context.Medias.OfType<MusicTrack>().SingleAsync(t => t.Id == extra.Id)).AlbumId.Should().Be(kept.Id);
+        (await _context.Medias.OfType<MusicTrack>().SingleAsync(t => t.Id == extra.Id)).AlbumId.Should().Be(duplicate.Id);
+    }
+
+    [Test]
+    public async Task Handle_ShouldMatchTracksAcrossNullAndOneDiscNumber_WhenTitlesMatch()
+    {
+        var kept = new MusicAlbum { Id = Guid.NewGuid(), Title = "Album" };
+        var duplicate = new MusicAlbum { Id = Guid.NewGuid(), Title = "Album (copy)" };
+        var keptTrack = new MusicTrack { Id = Guid.NewGuid(), Title = "One", AlbumId = kept.Id, TrackNumber = 1, DiscNumber = 1 };
+        var keptExtra = new MusicTrack { Id = Guid.NewGuid(), Title = "Two", AlbumId = kept.Id, TrackNumber = 2, DiscNumber = 1 };
+        var keptThird = new MusicTrack { Id = Guid.NewGuid(), Title = "Three", AlbumId = kept.Id, TrackNumber = 3, DiscNumber = 1 };
+        var colliding = new MusicTrack { Id = Guid.NewGuid(), Title = "One", AlbumId = duplicate.Id, TrackNumber = 1, DiscNumber = null };
+        _context.Medias.AddRange(kept, duplicate, keptTrack, keptExtra, keptThird, colliding);
+        var fileId = AddFile(colliding.Id, "/media/music/one.flac");
+        AddExternalId(kept.Id, "musicbrainz", "release-null-disc");
+        AddExternalId(duplicate.Id, "musicbrainz", "release-null-disc");
+        await _context.SaveChangesAsync();
+
+        var merged = await _handler.Handle(new MergeDuplicateExternalIdsCommand(), CancellationToken.None);
+
+        merged.Should().Be(1);
+        (await _context.Medias.OfType<MusicAlbum>().AnyAsync(a => a.Id == duplicate.Id)).Should().BeFalse();
+        (await _context.Medias.OfType<MusicTrack>().AnyAsync(t => t.Id == colliding.Id)).Should().BeFalse(
+            "track 1 with DiscNumber null must merge into disc 1, not stay as a duplicate row");
+        (await _context.IndexedFiles.SingleAsync(f => f.Id == fileId)).MediaId.Should().Be(keptTrack.Id);
+    }
+
+    [Test]
+    public async Task Handle_ShouldLeaveSourceTrack_WhenSameSlotButDifferentTitle()
+    {
+        var kept = new MusicAlbum { Id = Guid.NewGuid(), Title = "Fire Within" };
+        var duplicate = new MusicAlbum { Id = Guid.NewGuid(), Title = "Fire Within (Deluxe)" };
+        var keptTrack = new MusicTrack { Id = Guid.NewGuid(), Title = "Wings", AlbumId = kept.Id, TrackNumber = 1, DiscNumber = 1 };
+        var deluxeTrack = new MusicTrack { Id = Guid.NewGuid(), Title = "Skinny Love", AlbumId = duplicate.Id, TrackNumber = 1, DiscNumber = 1 };
+        _context.Medias.AddRange(kept, duplicate, keptTrack, deluxeTrack);
+        var fileId = AddFile(deluxeTrack.Id, "/media/music/deluxe/01.flac");
+        AddExternalId(kept.Id, "musicbrainz", "shared-bad-id");
+        AddExternalId(duplicate.Id, "musicbrainz", "shared-bad-id");
+        await _context.SaveChangesAsync();
+
+        var merged = await _handler.Handle(new MergeDuplicateExternalIdsCommand(), CancellationToken.None);
+
+        merged.Should().Be(0);
+        (await _context.Medias.OfType<MusicAlbum>().AnyAsync(a => a.Id == duplicate.Id)).Should().BeTrue();
+        (await _context.Medias.OfType<MusicTrack>().SingleAsync(t => t.Id == deluxeTrack.Id)).AlbumId.Should().Be(duplicate.Id);
+        (await _context.IndexedFiles.SingleAsync(f => f.Id == fileId)).MediaId.Should().Be(deluxeTrack.Id);
     }
 
     [Test]
@@ -271,6 +317,52 @@ public class MergeDuplicateExternalIdsTests
         merged.Should().Be(1);
         (await _context.Medias.OfType<MusicArtist>().AnyAsync(a => a.Id == duplicate.Id)).Should().BeFalse();
         (await _context.Medias.OfType<MusicAlbum>().SingleAsync(a => a.Id == movedAlbum.Id)).ArtistId.Should().Be(kept.Id);
+    }
+
+    [Test]
+    public async Task Handle_ShouldFoldImportedShellOntoPlayableAlbum_WhenMergingNamedDuplicates()
+    {
+        var artist = new MusicArtist { Id = Guid.NewGuid(), Title = "Stromae" };
+        var playable = new MusicAlbum { Id = Guid.NewGuid(), Title = "Cheese", ArtistId = artist.Id };
+        var shell = new MusicAlbum { Id = Guid.NewGuid(), Title = "Cheese (imported)", ArtistId = artist.Id };
+        var playableTrack = new MusicTrack
+        {
+            Id = Guid.NewGuid(),
+            Title = "Alors on danse",
+            AlbumId = playable.Id,
+            ArtistId = artist.Id
+        };
+        var shellTrack = new MusicTrack
+        {
+            Id = Guid.NewGuid(),
+            Title = "Alors on danse",
+            AlbumId = shell.Id,
+            ArtistId = artist.Id
+        };
+        var bonus = new MusicTrack
+        {
+            Id = Guid.NewGuid(),
+            Title = "Bonus",
+            AlbumId = shell.Id,
+            ArtistId = artist.Id
+        };
+        _context.Medias.AddRange(artist, playable, shell, playableTrack, shellTrack, bonus);
+        AddFile(playableTrack.Id, "/media/music/alors.flac");
+        var userId = Guid.NewGuid();
+        _context.Users.Add(new User { Id = userId, IdentityUserId = "u1", DisplayName = "u1" });
+        _context.UserMediaStates.Add(new UserMediaState { UserId = userId, MediaId = playableTrack.Id, PlayCount = 1 });
+        _context.UserMediaStates.Add(new UserMediaState { UserId = userId, MediaId = shellTrack.Id, PlayCount = 4 });
+        await _context.SaveChangesAsync();
+
+        var merged = await _handler.Handle(
+            new MergeDuplicateExternalIdsCommand { Scope = DuplicateMergeScope.NamedArtistsAndPersons },
+            CancellationToken.None);
+
+        merged.Should().Be(1);
+        (await _context.Medias.OfType<MusicTrack>().AnyAsync(t => t.Id == shellTrack.Id)).Should().BeFalse();
+        (await _context.Medias.OfType<MusicAlbum>().AnyAsync(a => a.Id == shell.Id)).Should().BeTrue();
+        (await _context.Medias.OfType<MusicTrack>().SingleAsync(t => t.Id == bonus.Id)).AlbumId.Should().Be(shell.Id);
+        (await _context.UserMediaStates.SingleAsync(s => s.MediaId == playableTrack.Id)).PlayCount.Should().Be(5);
     }
 
     [Test]

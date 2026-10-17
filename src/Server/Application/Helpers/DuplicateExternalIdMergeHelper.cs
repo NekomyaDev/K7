@@ -145,6 +145,36 @@ public static class DuplicateExternalIdMergeHelper
             }
         }
 
+        try
+        {
+            var reattached = await ImportedMusicShellReattachHelper.ReattachAsync(
+                context, logger, libraryId, limitToIds, cancellationToken);
+            absorbed += reattached.TracksReattached;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to merge imported music shells");
+        }
+
+        try
+        {
+            var repaired = await SameAlbumDuplicateTrackRepairHelper.RepairAsync(
+                context, logger, libraryId, limitToIds, cancellationToken);
+            absorbed += repaired.FileLessFolded + repaired.FormatDuplicatesFolded;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to repair same-album duplicate tracks");
+        }
+
         return absorbed;
     }
 
@@ -426,9 +456,7 @@ public static class DuplicateExternalIdMergeHelper
             var match = FindMatchingTrack(targetTracks, sourceTrack);
             if (match is null)
             {
-                sourceTrack.AlbumId = target.Id;
-                sourceTrack.Album = target;
-                targetTracks.Add(sourceTrack);
+                // Different edition (deluxe vs standard): leave the track on the source album.
                 continue;
             }
 
@@ -440,11 +468,6 @@ public static class DuplicateExternalIdMergeHelper
             tracksToDelete.Add(sourceTrack.Id);
         }
 
-        await MoveMediaPersonRolesAsync(context, source.Id, target.Id, cancellationToken);
-        await MoveMediaCreditsAsync(context, source.Id, target.Id, cancellationToken);
-        MoveMissingExternalIds(source, target);
-        await MediaUserStateTransferHelper.TransferAsync(
-            context, source.Id, target.Id, logger, cancellationToken);
         await context.SaveChangesAsync(cancellationToken);
 
         foreach (var trackId in tracksToDelete)
@@ -453,6 +476,25 @@ public static class DuplicateExternalIdMergeHelper
                 context, trackId, logger, cancellationToken);
         }
 
+        await context.SaveChangesAsync(cancellationToken);
+
+        var remainingOnSource = sourceTracks.Count(t => !tracksToDelete.Contains(t.Id));
+        if (remainingOnSource > 0)
+        {
+            logger.LogInformation(
+                "Kept album {AlbumId} after merging {MergedCount} matching tracks into {TargetAlbumId} because {RemainingCount} tracks did not match",
+                source.Id,
+                tracksToDelete.Count,
+                target.Id,
+                remainingOnSource);
+            return false;
+        }
+
+        await MoveMediaPersonRolesAsync(context, source.Id, target.Id, cancellationToken);
+        await MoveMediaCreditsAsync(context, source.Id, target.Id, cancellationToken);
+        MoveMissingExternalIds(source, target);
+        await MediaUserStateTransferHelper.TransferAsync(
+            context, source.Id, target.Id, logger, cancellationToken);
         await context.SaveChangesAsync(cancellationToken);
 
         if (!await context.Medias.OfType<MusicAlbum>().AnyAsync(a => a.Id == source.Id, cancellationToken))
@@ -477,11 +519,19 @@ public static class DuplicateExternalIdMergeHelper
         if (source.TrackNumber is not int trackNumber)
             return null;
 
+        var sourceDisc = NormalizeDiscNumber(source.DiscNumber);
         return tracks.FirstOrDefault(t =>
             t.Id != source.Id
             && t.TrackNumber == trackNumber
-            && t.DiscNumber == source.DiscNumber);
+            && NormalizeDiscNumber(t.DiscNumber) == sourceDisc
+            && ImportedMusicShellReattachHelper.TitlesMatch(source.Title, t.Title, null, null));
     }
+
+    /// <summary>
+    /// Tags often store disc 1 explicitly while imports leave DiscNumber null.
+    /// Treat null and 1 as the same slot so a merge does not pile both tracklists onto one album.
+    /// </summary>
+    private static int NormalizeDiscNumber(int? discNumber) => discNumber is null or < 1 ? 1 : discNumber.Value;
 
     private static async Task<int> MergeArtistsAsync(
         IApplicationDbContext context,
