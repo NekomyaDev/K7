@@ -647,6 +647,12 @@ public partial class Serie : IAsyncDisposable
 
     private string FormatSeasonNumber(int seasonNumber) => string.Format(S["SeasonNumber"], seasonNumber);
 
+    private static string GetSimilarMediaHref(MediaCardViewModel item) => item.Kind switch
+    {
+        MediaCardKind.Serie => $"/series/{item.Id}",
+        _ => $"/movies/{item.Id}"
+    };
+
     private async Task ExcludeSimilarForSelf(MediaCardViewModel item)
     {
         if (await MediaCardExcludeActions.ExcludeForSelfAsync(item, UserAdminService, Snackbar, S))

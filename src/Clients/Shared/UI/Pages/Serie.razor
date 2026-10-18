@@ -280,7 +280,7 @@ else if (_serie is not null)
                         {
                             <CarouselItem @key="media.Id">
                                 <MediaCard Model="media"
-                                           Href="@($"/series/{media.Id}")"
+                                           Href="@GetSimilarMediaHref(media)"
                                            OverlayEnabled="true"
                                            ProgressEnabled="_canTrackProgress"
                                            WatchedStatusEnabled="_canTrackProgress"
@@ -326,7 +326,7 @@ else if (_serie is not null)
                         {
                             <CarouselItem @key="media.Id">
                                 <MediaCard Model="media"
-                                           Href="@($"/series/{media.Id}")"
+                                           Href="@GetSimilarMediaHref(media)"
                                            OverlayEnabled="true"
                                            ProgressEnabled="_canTrackProgress"
                                            WatchedStatusEnabled="_canTrackProgress"
