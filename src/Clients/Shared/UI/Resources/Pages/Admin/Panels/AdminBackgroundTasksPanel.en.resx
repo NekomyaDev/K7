@@ -99,6 +99,7 @@
   <data name="TaskType_ExtractChaptersCommand" xml:space="preserve"><value>Chapter extraction</value></data>
   <data name="TaskType_RematchLibraryMediaCommand" xml:space="preserve"><value>Library rematch</value></data>
   <data name="TaskType_RefreshPersonMetadataCommand" xml:space="preserve"><value>Person metadata refresh</value></data>
+  <data name="TaskType_MergeDuplicateExternalIdsCommand" xml:space="preserve"><value>Duplicate merge</value></data>
   <data name="FilterByType" xml:space="preserve"><value>Filter by type</value></data>
   <data name="AllTypes" xml:space="preserve"><value>All types</value></data>
   <data name="TimeJustNow" xml:space="preserve"><value>Just now</value></data>

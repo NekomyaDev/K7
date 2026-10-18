@@ -99,4 +99,63 @@ internal static class CatalogMediaAvailabilityHelper
             .ToListAsync(cancellationToken))
             .ToHashSet();
     }
+
+    /// <summary>
+    /// Local libraries only. A K7-import shell has neither an album file nor a track file and stays out.
+    /// </summary>
+    internal static IQueryable<ArtistLibraryFileRow> SelectArtistLibrariesFromIndexedFiles(IApplicationDbContext context)
+    {
+        var fromAlbums =
+            from album in context.Medias.OfType<MusicAlbum>().AsNoTracking()
+            where album.ArtistId != null
+            join file in context.IndexedFiles.AsNoTracking() on album.Id equals file.MediaId
+            join library in context.Libraries.AsNoTracking() on file.LibraryId equals library.Id
+            where library.PeerServerId == null
+            select new ArtistLibraryFileRow { ArtistId = album.ArtistId!.Value, LibraryId = file.LibraryId };
+
+        var fromTracks =
+            from album in context.Medias.OfType<MusicAlbum>().AsNoTracking()
+            where album.ArtistId != null
+            join track in context.Medias.OfType<MusicTrack>().AsNoTracking() on album.Id equals track.AlbumId
+            join file in context.IndexedFiles.AsNoTracking() on track.Id equals file.MediaId
+            join library in context.Libraries.AsNoTracking() on file.LibraryId equals library.Id
+            where library.PeerServerId == null
+            select new ArtistLibraryFileRow { ArtistId = album.ArtistId!.Value, LibraryId = file.LibraryId };
+
+        return fromAlbums.Union(fromTracks);
+    }
+
+    internal static IQueryable<MusicArtist> WhereArtistHasIndexedCatalog(
+        this IQueryable<MusicArtist> artists,
+        IApplicationDbContext context,
+        Guid? libraryId = null)
+    {
+        var pairs = SelectArtistLibrariesFromIndexedFiles(context);
+        if (libraryId is Guid id)
+            pairs = pairs.Where(p => p.LibraryId == id);
+
+        return artists.Where(a => pairs.Any(p => p.ArtistId == a.Id));
+    }
+
+    /// <summary>
+    /// Drops music-album availability rows that have no file on the album or its tracks.
+    /// Other media types are unchanged. Availability is normally derived from files. This
+    /// also catches a stale row left on a K7-import shell.
+    /// </summary>
+    internal static IQueryable<MediaLibraryAvailability> WhereAlbumRowHasFiles(
+        this IQueryable<MediaLibraryAvailability> rows,
+        IApplicationDbContext context) =>
+        rows.Where(a =>
+            !context.Medias.OfType<MusicAlbum>().Any(album => album.Id == a.MediaId)
+            || context.Medias.OfType<MusicAlbum>().Any(album =>
+                album.Id == a.MediaId
+                && (album.IndexedFiles.Any()
+                    || album.RemoteIndexedFiles.Any()
+                    || album.Tracks.Any(t => t.IndexedFiles.Any() || t.RemoteIndexedFiles.Any()))));
+}
+
+internal sealed class ArtistLibraryFileRow
+{
+    public Guid ArtistId { get; set; }
+    public Guid LibraryId { get; set; }
 }

@@ -25,18 +25,26 @@ namespace K7.Server.Application.Helpers;
 ///   Two copies on the same album still are.
 /// - SuspectedDuplicateMedia: identity depends on the type, always inside one library.
 ///   Movies and series share a normalized title (trim + case-insensitive) and release year.
-///   Albums also share the artist name, so two Greatest Hits from different artists stay apart.
+///   Albums that have a file also share the artist name, so two Greatest Hits from different artists
+///   stay apart. A file-less album with no tracks left is still listed as an album. Each of its
+///   titles that already exists on the unique playable album is listed on its own, on both sides.
 ///   Music artists and persons share a normalized name only when they are not already distinct
 ///   provider identities. A shared provider id stays on DuplicateExternalId only. Two namesakes
 ///   that each have their own provider id stay out (homonyms). A copy with no provider id joins
 ///   one identified namesake, or other copies that also have none. Release year is ignored, and
 ///   a copy with no files of its own still joins that cluster (typical of a K7-import shell).
-///   Episodes and tracks stay out so generic titles cannot form huge groups. Candidates are a
-///   slim projection. Trim, case-fold and year run in process so Postgres never groups on
+///   Episodes and tracks stay out so generic titles cannot form huge groups, except a file-less
+///   album track whose title is already on the playable album: that pair is listed track by track.
+///   Candidates are a slim projection. Trim, case-fold and year run in process so Postgres never groups on
 ///   lower(btrim(title)) / date_part.
 /// </summary>
 public static class DuplicateMediaDiagnosticHelper
 {
+    /// <summary>
+    /// DateOnly legal range. Postgres accepts wider dates (including +/-infinity); extracting
+    /// their year via date_part(...)::int throws 22003 (integer out of range / dtoi4).
+    /// Filtering here keeps infinity dates out of the in-memory year extraction.
+    /// </summary>
     /// <summary>
     /// DateOnly legal range. Postgres accepts wider dates (including +/-infinity); extracting
     /// their year via date_part(...)::int throws 22003 (integer out of range / dtoi4).
@@ -305,6 +313,7 @@ public static class DuplicateMediaDiagnosticHelper
         var pairs = new List<SuspectedDuplicatePair>();
         pairs.AddRange(await LoadTitleYearPairsAsync(context, libraryId, cancellationToken));
         pairs.AddRange(await LoadAlbumPairsAsync(context, libraryId, cancellationToken));
+        pairs.AddRange(await LoadImportedShellPairsAsync(context, libraryId, cancellationToken));
         pairs.AddRange(PairsFromGroups(
             await LoadNamedArtistGroupsAsync(context, cancellationToken),
             libraryId));
@@ -383,7 +392,21 @@ public static class DuplicateMediaDiagnosticHelper
         if (rows.Count == 0)
             return [];
 
-        var artistIds = rows.Where(r => r.ArtistId != null).Select(r => r.ArtistId!.Value).Distinct().ToList();
+        var albumIds = rows.Select(r => r.MediaId).Distinct().ToList();
+        var albumsWithFiles = (await context.Medias
+            .OfType<MusicAlbum>()
+            .AsNoTracking()
+            .Where(a => albumIds.Contains(a.Id)
+                && (a.IndexedFiles.Any()
+                    || a.RemoteIndexedFiles.Any()
+                    || a.Tracks.Any(t => t.IndexedFiles.Any() || t.RemoteIndexedFiles.Any())))
+            .Select(a => a.Id)
+            .ToListAsync(cancellationToken)).ToHashSet();
+        var playableRows = rows.Where(r => albumsWithFiles.Contains(r.MediaId)).ToList();
+        if (playableRows.Count == 0)
+            return [];
+
+        var artistIds = playableRows.Where(r => r.ArtistId != null).Select(r => r.ArtistId!.Value).Distinct().ToList();
         var artistTitles = artistIds.Count == 0
             ? new Dictionary<Guid, string?>()
             : await context.Medias
@@ -392,14 +415,14 @@ public static class DuplicateMediaDiagnosticHelper
                 .Where(a => artistIds.Contains(a.Id))
                 .ToDictionaryAsync(a => a.Id, a => a.Title, cancellationToken);
 
-        var needsCredits = rows
+        var needsCredits = playableRows
             .Where(r => ArtistKey(r.ArtistId, artistTitles, null).Length == 0)
             .Select(r => r.MediaId)
             .Distinct()
             .ToList();
         var creditsByAlbum = await LoadCreditNamesByAlbumAsync(context, needsCredits, cancellationToken);
 
-        return rows
+        return playableRows
             .GroupBy(r => (
                 r.LibraryId,
                 Title: NormalizeTitle(r.Title),
@@ -410,6 +433,44 @@ public static class DuplicateMediaDiagnosticHelper
             .Select(r => new SuspectedDuplicatePair(r.LibraryId, r.MediaId))
             .Distinct()
             .ToList();
+    }
+
+    private static async Task<List<SuspectedDuplicatePair>> LoadImportedShellPairsAsync(
+        IApplicationDbContext context,
+        Guid? libraryId,
+        CancellationToken cancellationToken)
+    {
+        var found = await ImportedMusicShellReattachHelper.FindPairsAsync(
+            context, libraryId, limitToIds: null, cancellationToken);
+        var match = await ImportedMusicShellReattachHelper.MatchTracksAsync(context, found, cancellationToken);
+        var shellsWithTracks = match.Tracks.Select(t => t.ShellAlbumId).ToHashSet();
+        var pairs = new List<SuspectedDuplicatePair>();
+        foreach (var pair in match.StillOpen)
+        {
+            if (shellsWithTracks.Contains(pair.ShellAlbumId))
+                continue;
+
+            foreach (var library in pair.LibraryIds)
+            {
+                pairs.Add(new SuspectedDuplicatePair(library, pair.ShellAlbumId));
+                pairs.Add(new SuspectedDuplicatePair(library, pair.PlayableAlbumId));
+            }
+        }
+
+        var pairByShell = found.ToDictionary(p => p.ShellAlbumId);
+        foreach (var track in match.Tracks)
+        {
+            if (!pairByShell.TryGetValue(track.ShellAlbumId, out var pair))
+                continue;
+
+            foreach (var library in pair.LibraryIds)
+            {
+                pairs.Add(new SuspectedDuplicatePair(library, track.ShellTrackId));
+                pairs.Add(new SuspectedDuplicatePair(library, track.PlayableTrackId));
+            }
+        }
+
+        return pairs;
     }
 
     private static async Task<Dictionary<Guid, List<string>>> LoadCreditNamesByAlbumAsync(

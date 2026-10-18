@@ -99,6 +99,7 @@
   <data name="TaskType_ExtractChaptersCommand" xml:space="preserve"><value>Extraction des chapitres</value></data>
   <data name="TaskType_RematchLibraryMediaCommand" xml:space="preserve"><value>Rematch de bibliothèque</value></data>
   <data name="TaskType_RefreshPersonMetadataCommand" xml:space="preserve"><value>Rafraîchissement des métadonnées d'artiste</value></data>
+  <data name="TaskType_MergeDuplicateExternalIdsCommand" xml:space="preserve"><value>Fusion des doublons</value></data>
   <data name="FilterByType" xml:space="preserve"><value>Filtrer par type</value></data>
   <data name="AllTypes" xml:space="preserve"><value>Tous les types</value></data>
   <data name="TimeJustNow" xml:space="preserve"><value>A l'instant</value></data>

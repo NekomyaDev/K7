@@ -367,6 +367,100 @@ public class DuplicateMediaDiagnosticsTests
     }
 
     [Test]
+    public async Task Handle_ShouldReportSuspectedDuplicate_WhenImportedShellMatchesPlayableAlbum()
+    {
+        var artist = AddArtist("Stromae");
+        var playable = AddReleasedAlbum("Cheese", 2010, artist);
+        var shell = new MusicAlbum
+        {
+            Id = Guid.NewGuid(),
+            Title = "Cheese (imported)",
+            ArtistId = artist
+        };
+        _context.Medias.Add(shell);
+        await _context.SaveChangesAsync();
+
+        var items = await QueryItemsAsync(DiagnosticIssue.SuspectedDuplicateMedia);
+
+        items.Select(i => i.EntityId).Should().BeEquivalentTo([playable, shell.Id]);
+    }
+
+    [Test]
+    public async Task Handle_ShouldNotReportSuspectedDuplicate_WhenShellTrackIsNotOnThePlayableAlbum()
+    {
+        var artist = AddArtist("Stromae");
+        var playable = AddReleasedAlbum("Cheese", 2010, artist);
+        AddTrack("Alors on danse", playable);
+        var shell = new MusicAlbum
+        {
+            Id = Guid.NewGuid(),
+            Title = "Cheese (imported)",
+            ArtistId = artist
+        };
+        _context.Medias.Add(shell);
+        _context.Medias.Add(new MusicTrack
+        {
+            Id = Guid.NewGuid(),
+            Title = "Bonus",
+            AlbumId = shell.Id,
+            ArtistId = artist
+        });
+        await _context.SaveChangesAsync();
+
+        var items = await QueryItemsAsync(DiagnosticIssue.SuspectedDuplicateMedia);
+
+        items.Should().BeEmpty();
+    }
+
+    [Test]
+    public async Task Handle_ShouldReportSuspectedDuplicate_WhenFileLessAlbumRepeatsAPlayableTitle()
+    {
+        var artist = AddArtist("Stromae");
+        var playable = AddReleasedAlbum("Cheese", 2010, artist);
+        var playableTrack = AddTrack("Alors on danse", playable);
+        var shell = new MusicAlbum
+        {
+            Id = Guid.NewGuid(),
+            Title = "Cheese",
+            ArtistId = artist
+        };
+        var shellTrack = Guid.NewGuid();
+        _context.Medias.Add(shell);
+        _context.Medias.Add(new MusicTrack
+        {
+            Id = shellTrack,
+            Title = "Alors on danse",
+            AlbumId = shell.Id,
+            ArtistId = artist
+        });
+        await _context.SaveChangesAsync();
+
+        var items = await QueryItemsAsync(DiagnosticIssue.SuspectedDuplicateMedia);
+
+        items.Select(i => i.EntityId).Should().BeEquivalentTo([playableTrack, shellTrack]);
+        items.Select(i => i.EntityName).Should().BeEquivalentTo(["Alors on danse - Cheese", "Alors on danse - Cheese"]);
+    }
+
+    [Test]
+    public async Task Handle_ShouldNotReportSuspectedDuplicate_WhenImportedShellArtistDiffers()
+    {
+        var stromae = AddArtist("Stromae");
+        var other = AddArtist("Other");
+        AddReleasedAlbum("Cheese", 2010, stromae);
+        _context.Medias.Add(new MusicAlbum
+        {
+            Id = Guid.NewGuid(),
+            Title = "Cheese (imported)",
+            ArtistId = other
+        });
+        await _context.SaveChangesAsync();
+
+        var items = await QueryItemsAsync(DiagnosticIssue.SuspectedDuplicateMedia);
+
+        items.Should().BeEmpty();
+    }
+
+    [Test]
     public async Task Handle_ShouldNotReportSuspectedDuplicate_WhenAlbumsShareTitleAndYearButNotArtist()
     {
         var queen = AddArtist("Queen");
@@ -756,6 +850,17 @@ public class DuplicateMediaDiagnosticsTests
         {
             LibraryId = _libraryId,
             MediaId = album.Id
+        });
+        _context.IndexedFiles.Add(new IndexedFile
+        {
+            Id = Guid.NewGuid(),
+            LibraryId = _libraryId,
+            MediaId = album.Id,
+            Name = "track",
+            Extension = ".flac",
+            Path = $"/music/{album.Id:N}/track.flac",
+            Hash = (uint)album.Id.GetHashCode(),
+            Size = 1
         });
         return album.Id;
     }

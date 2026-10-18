@@ -248,16 +248,13 @@ public class GetDiagnosticsSummaryQueryHandler : IRequestHandler<GetDiagnosticsS
     private async Task<Dictionary<Guid, int>> GetMissingMembersCountsAsync(CancellationToken cancellationToken)
     {
         // Mirror GetDiagnosticItems / DiagnosticIssueEntityResolver: MusicArtists with no PersonRoles,
-        // attributed to libraries via albums that have IndexedFiles.
+        // attributed to libraries via an indexed file on an album or one of its tracks.
+        var filePairs = CatalogMediaAvailabilityHelper.SelectArtistLibrariesFromIndexedFiles(_context);
         var counts = await (
             from artist in _context.Medias.OfType<MusicArtist>().AsNoTracking()
             where !artist.PersonRoles.Any()
-            join album in _context.Medias.OfType<MusicAlbum>().AsNoTracking()
-                on artist.Id equals album.ArtistId
-            join file in _context.IndexedFiles.AsNoTracking() on album.Id equals file.MediaId
-            join library in _context.Libraries.AsNoTracking() on file.LibraryId equals library.Id
-            where library.PeerServerId == null
-            select new { ArtistId = artist.Id, file.LibraryId }
+            join pair in filePairs on artist.Id equals pair.ArtistId
+            select new { ArtistId = artist.Id, pair.LibraryId }
         )
             .Distinct()
             .GroupBy(x => x.LibraryId)
@@ -392,15 +389,12 @@ public class GetDiagnosticsSummaryQueryHandler : IRequestHandler<GetDiagnosticsS
 
         var byLibrary = counts.ToDictionary(x => x.LibraryId, x => x.Count);
 
+        var artistFilePairs = CatalogMediaAvailabilityHelper.SelectArtistLibrariesFromIndexedFiles(_context);
         var artistCounts = await (
             from artist in _context.Medias.OfType<MusicArtist>().AsNoTracking()
             where artist.ReleaseDate == null
-            join album in _context.Medias.OfType<MusicAlbum>().AsNoTracking()
-                on artist.Id equals album.ArtistId
-            join file in _context.IndexedFiles.AsNoTracking() on album.Id equals file.MediaId
-            join library in _context.Libraries.AsNoTracking() on file.LibraryId equals library.Id
-            where library.PeerServerId == null
-            select new { artist.Id, file.LibraryId }
+            join pair in artistFilePairs on artist.Id equals pair.ArtistId
+            select new { artist.Id, pair.LibraryId }
         )
             .Distinct()
             .GroupBy(x => x.LibraryId)
@@ -503,7 +497,7 @@ public class GetDiagnosticsSummaryQueryHandler : IRequestHandler<GetDiagnosticsS
     }
 
     private IQueryable<MediaLibraryPairProjection> LocalAvailabilityPairs() =>
-        from a in _context.MediaLibraryAvailabilities.AsNoTracking()
+        from a in _context.MediaLibraryAvailabilities.AsNoTracking().WhereAlbumRowHasFiles(_context)
         join library in _context.Libraries.AsNoTracking() on a.LibraryId equals library.Id
         where library.PeerServerId == null
         select new MediaLibraryPairProjection { LibraryId = a.LibraryId, MediaId = a.MediaId };

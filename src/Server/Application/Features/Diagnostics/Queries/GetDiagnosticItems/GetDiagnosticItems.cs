@@ -431,6 +431,7 @@ public class GetDiagnosticItemsQueryHandler : IRequestHandler<GetDiagnosticItems
     {
         var libraryMediaQuery = _context.MediaLibraryAvailabilities
             .Where(a => !_context.Libraries.Any(l => l.Id == a.LibraryId && l.PeerServerId != null))
+            .WhereAlbumRowHasFiles(_context)
             .AsQueryable();
 
         if (request.LibraryId.HasValue)
@@ -663,7 +664,8 @@ public class GetDiagnosticItemsQueryHandler : IRequestHandler<GetDiagnosticItems
             return EmptyPage(request);
 
         var availability = _context.MediaLibraryAvailabilities
-            .Where(a => !_context.Libraries.Any(l => l.Id == a.LibraryId && l.PeerServerId != null));
+            .Where(a => !_context.Libraries.Any(l => l.Id == a.LibraryId && l.PeerServerId != null))
+            .WhereAlbumRowHasFiles(_context);
 
         if (request.LibraryId.HasValue)
             availability = availability.Where(a => a.LibraryId == request.LibraryId.Value);
@@ -1056,7 +1058,160 @@ public class GetDiagnosticItemsQueryHandler : IRequestHandler<GetDiagnosticItems
 
         var items = await GetMediaIssuesAsync(request, cancellationToken, pageIds);
         items = ApplyIssueFilters(items, request);
+        items = await AppendImportedShellsAsync(request, items, pageIds, cancellationToken);
+        items = await AppendShellTracksAsync(request, items, pageIds, cancellationToken);
         return new PaginatedList<DiagnosticItemDto>(items, totalCount, request.PageNumber, request.PageSize);
+    }
+
+    private async Task<List<DiagnosticItemDto>> AppendImportedShellsAsync(
+        GetDiagnosticItemsQuery request,
+        List<DiagnosticItemDto> items,
+        IReadOnlyList<Guid> pageIds,
+        CancellationToken cancellationToken)
+    {
+        var listed = items.Select(i => i.EntityId).ToHashSet();
+        var missing = pageIds.Where(id => !listed.Contains(id)).ToList();
+        if (missing.Count == 0)
+            return items;
+
+        var pairs = await ImportedMusicShellReattachHelper.FindPairsAsync(
+            _context, request.LibraryId, missing, cancellationToken);
+        if (pairs.Count == 0)
+            return items;
+
+        var shellIds = pairs.Select(p => p.ShellAlbumId).Where(missing.Contains).Distinct().ToList();
+        if (shellIds.Count == 0)
+            return items;
+
+        var shells = await _context.Medias
+            .OfType<MusicAlbum>()
+            .AsNoTracking()
+            .Where(a => shellIds.Contains(a.Id))
+            .Select(a => new { a.Id, a.Title })
+            .ToListAsync(cancellationToken);
+        var libraryIds = pairs.SelectMany(p => p.LibraryIds).Distinct().ToList();
+        var libraryTitles = await _context.Libraries
+            .AsNoTracking()
+            .Where(l => libraryIds.Contains(l.Id))
+            .ToDictionaryAsync(l => l.Id, l => l.Title, cancellationToken);
+        var libraryByShell = pairs
+            .Where(p => p.LibraryIds.Count > 0)
+            .GroupBy(p => p.ShellAlbumId)
+            .ToDictionary(g => g.Key, g => g.First().LibraryIds[0]);
+
+        foreach (var shell in shells)
+        {
+            if (!libraryByShell.TryGetValue(shell.Id, out var libraryId))
+                continue;
+
+            items.Add(new DiagnosticItemDto
+            {
+                EntityId = shell.Id,
+                EntityName = shell.Title ?? "(untitled)",
+                EntityType = DiagnosticEntityType.Media,
+                LibraryId = libraryId,
+                LibraryTitle = libraryTitles.GetValueOrDefault(libraryId) ?? "",
+                Issues = [DiagnosticIssue.SuspectedDuplicateMedia],
+                Severity = GetIssueSeverity(DiagnosticIssue.SuspectedDuplicateMedia),
+                MediaType = MediaType.MusicAlbum,
+                MediaUrl = MediaPageUrls.Build(MediaType.MusicAlbum, shell.Id)
+            });
+        }
+
+        return items;
+    }
+
+    private async Task<List<DiagnosticItemDto>> AppendShellTracksAsync(
+        GetDiagnosticItemsQuery request,
+        List<DiagnosticItemDto> items,
+        IReadOnlyList<Guid> pageIds,
+        CancellationToken cancellationToken)
+    {
+        var listed = items.Select(i => i.EntityId).ToHashSet();
+        var missing = pageIds.Where(id => !listed.Contains(id)).ToList();
+        if (missing.Count == 0)
+            return await NameShellTracksAsync(items, cancellationToken);
+
+        var tracks = await _context.Medias
+            .OfType<MusicTrack>()
+            .AsNoTracking()
+            .Where(t => missing.Contains(t.Id))
+            .Select(t => new { t.Id, t.Title, t.AlbumId, AlbumTitle = t.Album!.Title })
+            .ToListAsync(cancellationToken);
+        if (tracks.Count == 0)
+            return await NameShellTracksAsync(items, cancellationToken);
+
+        var albumIds = tracks.Select(t => t.AlbumId).Distinct().ToList();
+        var pairs = await ImportedMusicShellReattachHelper.FindPairsAsync(
+            _context, request.LibraryId, albumIds, cancellationToken);
+        var libraryByAlbum = new Dictionary<Guid, Guid>();
+        foreach (var pair in pairs)
+        {
+            if (pair.LibraryIds.Count == 0)
+                continue;
+
+            libraryByAlbum[pair.ShellAlbumId] = pair.LibraryIds[0];
+            libraryByAlbum[pair.PlayableAlbumId] = pair.LibraryIds[0];
+        }
+
+        var libraryIds = libraryByAlbum.Values.Distinct().ToList();
+        var libraryTitles = await _context.Libraries
+            .AsNoTracking()
+            .Where(l => libraryIds.Contains(l.Id))
+            .ToDictionaryAsync(l => l.Id, l => l.Title, cancellationToken);
+
+        foreach (var track in tracks)
+        {
+            if (!libraryByAlbum.TryGetValue(track.AlbumId, out var libraryId))
+                continue;
+
+            items.Add(new DiagnosticItemDto
+            {
+                EntityId = track.Id,
+                EntityName = TrackOnAlbum(track.Title, track.AlbumTitle),
+                EntityType = DiagnosticEntityType.Media,
+                LibraryId = libraryId,
+                LibraryTitle = libraryTitles.GetValueOrDefault(libraryId) ?? "",
+                Issues = [DiagnosticIssue.SuspectedDuplicateMedia],
+                Severity = GetIssueSeverity(DiagnosticIssue.SuspectedDuplicateMedia),
+                MediaType = MediaType.MusicTrack,
+                MediaUrl = MediaPageUrls.Build(MediaType.MusicTrack, track.Id, albumId: track.AlbumId)
+            });
+        }
+
+        return await NameShellTracksAsync(items, cancellationToken);
+    }
+
+    private async Task<List<DiagnosticItemDto>> NameShellTracksAsync(
+        List<DiagnosticItemDto> items,
+        CancellationToken cancellationToken)
+    {
+        var trackIds = items
+            .Where(i => i.MediaType == MediaType.MusicTrack)
+            .Select(i => i.EntityId)
+            .Distinct()
+            .ToList();
+        if (trackIds.Count == 0)
+            return items;
+
+        var names = await _context.Medias
+            .OfType<MusicTrack>()
+            .AsNoTracking()
+            .Where(t => trackIds.Contains(t.Id))
+            .Select(t => new { t.Id, t.Title, AlbumTitle = t.Album!.Title })
+            .ToDictionaryAsync(t => t.Id, cancellationToken);
+
+        return items
+            .Select(item => names.TryGetValue(item.EntityId, out var track)
+                ? item with { EntityName = TrackOnAlbum(track.Title, track.AlbumTitle) }
+                : item)
+            .ToList();
+    }
+
+    private static string TrackOnAlbum(string? title, string? albumTitle)
+    {
+        var trackTitle = string.IsNullOrWhiteSpace(title) ? "(untitled)" : title;
+        return string.IsNullOrWhiteSpace(albumTitle) ? trackTitle : $"{trackTitle} - {albumTitle}";
     }
 
     private async Task<PaginatedList<DiagnosticItemDto>> GetMissingIntroOutroIssuePageAsync(
@@ -1164,14 +1319,13 @@ public class GetDiagnosticItemsQueryHandler : IRequestHandler<GetDiagnosticItems
             })
             .ToListAsync(cancellationToken);
 
-        // Find the library via the artist's albums
+        // Library comes from a file on the album or on one of its tracks.
         var artistIds = artists.Select(a => a.Id).ToHashSet();
-        var artistLibraryPairs = await (
-            from album in _context.Medias.OfType<MusicAlbum>()
-            where album.ArtistId != null && artistIds.Contains(album.ArtistId.Value)
-            join f in _context.IndexedFiles on album.Id equals f.MediaId
-            select new { ArtistId = album.ArtistId!.Value, f.LibraryId }
-        ).Distinct().ToListAsync(cancellationToken);
+        var artistLibraryPairs = await CatalogMediaAvailabilityHelper
+            .SelectArtistLibrariesFromIndexedFiles(_context)
+            .Where(p => artistIds.Contains(p.ArtistId))
+            .Distinct()
+            .ToListAsync(cancellationToken);
 
         var artistToLibrary = artistLibraryPairs
             .DistinctBy(x => x.ArtistId)
@@ -1196,11 +1350,20 @@ public class GetDiagnosticItemsQueryHandler : IRequestHandler<GetDiagnosticItems
             .Where(l => libraryIds.Contains(l.Id))
             .ToDictionaryAsync(l => l.Id, l => l.Title, cancellationToken);
 
+        var playableArtistIds = (await _context.Medias.OfType<MusicArtist>()
+            .AsNoTracking()
+            .Where(a => artistIdSet.Contains(a.Id))
+            .WhereArtistHasIndexedCatalog(_context)
+            .Select(a => a.Id)
+            .ToListAsync(cancellationToken))
+            .ToHashSet();
+
         return artists.Select(a =>
         {
             var issues = new List<DiagnosticIssue>();
-            if (!a.HasMembers) issues.Add(DiagnosticIssue.MissingMembers);
-            if (a.ReleaseDate is null) issues.Add(DiagnosticIssue.MissingMetadata);
+            var hasCatalogFiles = playableArtistIds.Contains(a.Id);
+            if (!a.HasMembers && hasCatalogFiles) issues.Add(DiagnosticIssue.MissingMembers);
+            if (a.ReleaseDate is null && hasCatalogFiles) issues.Add(DiagnosticIssue.MissingMetadata);
             if (duplicateArtistIds.Contains(a.Id)) issues.Add(DiagnosticIssue.DuplicateExternalId);
             if (suspectedArtistIds.Contains(a.Id)) issues.Add(DiagnosticIssue.SuspectedDuplicateMedia);
 
@@ -1258,9 +1421,9 @@ public class GetDiagnosticItemsQueryHandler : IRequestHandler<GetDiagnosticItems
         void AddMatched(IQueryable<MusicArtist> next) => matched = matched is null ? next : matched.Union(next);
 
         if (wantMembers)
-            AddMatched(allArtists.Where(a => !a.PersonRoles.Any()));
+            AddMatched(allArtists.Where(a => !a.PersonRoles.Any()).WhereArtistHasIndexedCatalog(_context));
         if (wantMetadata)
-            AddMatched(allArtists.Where(a => a.ReleaseDate == null));
+            AddMatched(allArtists.Where(a => a.ReleaseDate == null).WhereArtistHasIndexedCatalog(_context));
         if (suspectedArtistIds.Count > 0)
             AddMatched(allArtists.Where(a => suspectedArtistIds.Contains(a.Id)));
         if (duplicateArtistIds.Count > 0)
@@ -1282,10 +1445,7 @@ public class GetDiagnosticItemsQueryHandler : IRequestHandler<GetDiagnosticItems
             if (duplicateArtistIds.Count > 0)
                 AddInLibrary(allArtists.Where(a => duplicateArtistIds.Contains(a.Id)));
 
-            AddInLibrary(allArtists.Where(a => _context.Medias.OfType<MusicAlbum>()
-                .Where(album => album.ArtistId == a.Id)
-                .Join(_context.IndexedFiles, album => album.Id, file => file.MediaId, (_, file) => file.LibraryId)
-                .Any(id => id == libraryId)));
+            AddInLibrary(allArtists.WhereArtistHasIndexedCatalog(_context, libraryId));
 
             artists = artists.Join(inLibrary!, a => a.Id, b => b.Id, (a, _) => a);
         }

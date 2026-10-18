@@ -229,23 +229,13 @@ public class DiagnosticIssueEntityResolver(
         Guid? libraryId,
         CancellationToken cancellationToken)
     {
-        var artists = await context.Medias
+        var artists = context.Medias
             .AsNoTracking()
             .OfType<MusicArtist>()
             .Where(a => a.ReleaseDate == null)
-            .Select(a => a.Id)
-            .ToListAsync(cancellationToken);
+            .WhereArtistHasIndexedCatalog(context, libraryId);
 
-        if (!libraryId.HasValue)
-            return artists;
-
-        return await (
-            from album in context.Medias.OfType<MusicAlbum>()
-            where album.ArtistId != null && artists.Contains(album.ArtistId.Value)
-            join f in context.IndexedFiles on album.Id equals f.MediaId
-            where f.LibraryId == libraryId.Value
-            select album.ArtistId!.Value
-        ).Distinct().ToListAsync(cancellationToken);
+        return await artists.Select(a => a.Id).ToListAsync(cancellationToken);
     }
 
     private async Task<List<Guid>> GetMediaIdsMissingExternalIdAsync(
@@ -302,25 +292,13 @@ public class DiagnosticIssueEntityResolver(
         Guid? libraryId,
         CancellationToken cancellationToken)
     {
-        var artists = await context.Medias
+        return await context.Medias
             .AsNoTracking()
             .OfType<MusicArtist>()
             .Where(a => !a.PersonRoles.Any())
+            .WhereArtistHasIndexedCatalog(context, libraryId)
             .Select(a => a.Id)
             .ToListAsync(cancellationToken);
-
-        if (!libraryId.HasValue)
-            return artists;
-
-        var artistIdsInLibrary = await (
-            from album in context.Medias.OfType<MusicAlbum>()
-            where album.ArtistId != null && artists.Contains(album.ArtistId.Value)
-            join f in context.IndexedFiles on album.Id equals f.MediaId
-            where f.LibraryId == libraryId.Value
-            select album.ArtistId!.Value
-        ).Distinct().ToListAsync(cancellationToken);
-
-        return artistIdsInLibrary;
     }
 
     private async Task<List<Guid>> GetOrphanIndexedFileIdsAsync(

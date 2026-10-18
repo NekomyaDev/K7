@@ -395,7 +395,21 @@ public class GetDiagnosticItemsPagingTests
             Title = "Dated",
             ReleaseDate = new DateOnly(1990, 5, 1)
         };
-        _context.Medias.AddRange(missing, dated);
+        var shell = new MusicArtist { Id = Guid.NewGuid(), Title = "Import Shell" };
+        var missingAlbum = new MusicAlbum { Id = Guid.NewGuid(), Title = "A", ArtistId = missing.Id };
+        var shellAlbum = new MusicAlbum { Id = Guid.NewGuid(), Title = "Shell", ArtistId = shell.Id };
+        _context.Medias.AddRange(missing, dated, shell, missingAlbum, shellAlbum);
+        _context.IndexedFiles.Add(new IndexedFile
+        {
+            Id = Guid.NewGuid(),
+            LibraryId = _libraryId,
+            MediaId = missingAlbum.Id,
+            Name = "track",
+            Extension = ".flac",
+            Path = "/music/a/track.flac",
+            Hash = 1,
+            Size = 1
+        });
         await _context.SaveChangesAsync();
 
         var result = await _handler.Handle(

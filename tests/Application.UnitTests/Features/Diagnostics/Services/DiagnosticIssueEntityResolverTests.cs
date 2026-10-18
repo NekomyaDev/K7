@@ -64,7 +64,7 @@ public class DiagnosticIssueEntityResolverTests
         var ids = await _resolver.ResolveEntityIdsAsync(
             DiagnosticIssue.MissingMetadata, libraryId: null, CancellationToken.None);
 
-        ids.Should().BeEquivalentTo([missingId, unlinkedId]);
+        ids.Should().BeEquivalentTo([missingId]);
     }
 
     [Test]
