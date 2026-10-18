@@ -66,11 +66,12 @@ public class MusicMetadataIdentityService(
             return null;
         }
 
+        // Search may stamp MusicBrainzReleaseId when layout hints picked a concrete release.
         return new MusicAlbumIdentityMatch(
             providerName,
             externalId,
             artistMbid,
-            FirstNonEmpty(identification.MusicBrainzReleaseId));
+            FirstNonEmpty(identification.MusicBrainzReleaseId, searchIdentification.MusicBrainzReleaseId));
     }
 
     public async Task<string?> ResolveArtistIdAsync(
@@ -121,11 +122,14 @@ public class MusicMetadataIdentityService(
             ArtistName = source.ArtistName,
             ReleaseYear = source.ReleaseYear,
             TrackNumber = source.TrackNumber,
+            DiscNumber = source.DiscNumber,
             MusicBrainzReleaseId = source.MusicBrainzReleaseId,
             MusicBrainzReleaseGroupId = source.MusicBrainzReleaseGroupId,
             MusicBrainzArtistId = source.MusicBrainzArtistId,
             MusicBrainzAlbumArtistId = source.MusicBrainzAlbumArtistId,
             MusicBrainzRecordingId = source.MusicBrainzRecordingId,
+            ExpectedTrackCount = source.ExpectedTrackCount,
+            ExpectedDiscCount = source.ExpectedDiscCount,
             ProviderName = source.ProviderName,
             ProviderExternalId = source.ProviderExternalId
         };

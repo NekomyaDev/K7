@@ -71,25 +71,29 @@ public class MusicBrainzMetadataProvider : IMetadataProvider<ExternalMusicAlbumM
             if (string.IsNullOrWhiteSpace(query))
                 return null;
 
-            var url = $"{BaseUrl}/release/?query={Uri.EscapeDataString(query)}&limit=10&fmt=json";
+            var url = $"{BaseUrl}/release/?query={Uri.EscapeDataString(query)}&limit=25&fmt=json";
 
             await _rateLimiter.WaitAsync(Host, cancellationToken);
             var response = await _httpClient.GetFromJsonAsync<MbReleaseSearchResult>(url, JsonOptions, cancellationToken);
             var candidates = response?.Releases?
-                .Where(r => r.Score >= 80)
+                .Where(r => r.Score >= 80 && !string.IsNullOrWhiteSpace(r.ReleaseGroup?.Id))
                 .ToList() ?? [];
 
             if (candidates.Count == 0)
                 return null;
 
-            var yearIndex = FindPreferredYearIndex(
-                candidates.Select(c => c.Date).ToList(),
-                identification.ReleaseYear?.Year);
-            var bestMatch = yearIndex is int i ? candidates[i] : candidates[0];
+            var bestMatch = PickBestSearchRelease(candidates, identification);
 
             // Album ExternalId is always a release-group id - never fall back to release id.
             if (string.IsNullOrWhiteSpace(bestMatch.ReleaseGroup?.Id))
                 return null;
+
+            // Remember the concrete release when layout hints drove the pick (CreateMedia stores musicbrainz-release).
+            if (string.IsNullOrWhiteSpace(identification.MusicBrainzReleaseId)
+                && HasLayoutHints(identification))
+            {
+                identification.MusicBrainzReleaseId = bestMatch.Id;
+            }
 
             return bestMatch.ReleaseGroup.Id;
         }
@@ -112,7 +116,7 @@ public class MusicBrainzMetadataProvider : IMetadataProvider<ExternalMusicAlbumM
         // 1. Fetch release-group for genres/tags
         var releaseGroup = await GetReleaseGroupAsync(releaseGroupId, cancellationToken);
 
-        // 2. Find the best release within the group (Lidarr-like scoring when hints are available)
+        // 2. Find the best release within the group (layout hints when available)
         var releaseId = await FindBestReleaseIdAsync(releaseGroupId, hints, cancellationToken);
 
         // 3. Fetch the full release with recordings
@@ -436,15 +440,22 @@ public class MusicBrainzMetadataProvider : IMetadataProvider<ExternalMusicAlbumM
     {
         try
         {
-            if (!string.IsNullOrWhiteSpace(hints?.PreferredReleaseId))
-                return hints.PreferredReleaseId;
-
-            var url = $"{BaseUrl}/release?release-group={releaseGroupId}&inc=media&fmt=json&limit=25";
+            var url = $"{BaseUrl}/release?release-group={releaseGroupId}&inc=media&fmt=json&limit=100";
             await _rateLimiter.WaitAsync(Host, cancellationToken);
             var result = await _httpClient.GetFromJsonAsync<MbReleaseList>(url, JsonOptions, cancellationToken);
             var releases = result?.Releases;
             if (releases is null || releases.Count == 0)
                 return null;
+
+            // Embedded MUSICBRAINZ_ALBUMID (release id) is authoritative when present.
+            // Layout hints only break ties when no preferred release id is set.
+            if (!string.IsNullOrWhiteSpace(hints?.PreferredReleaseId))
+            {
+                var preferred = releases.FirstOrDefault(r =>
+                    string.Equals(r.Id, hints.PreferredReleaseId, StringComparison.OrdinalIgnoreCase));
+                if (preferred is not null)
+                    return preferred.Id;
+            }
 
             return releases
                 .OrderByDescending(r => ScoreRelease(r, hints))
@@ -460,15 +471,34 @@ public class MusicBrainzMetadataProvider : IMetadataProvider<ExternalMusicAlbumM
 
     private static int ScoreRelease(MbReleaseSummary release, MusicAlbumReleaseHints? hints)
     {
-        var score = 0;
-        if (string.Equals(release.Status, "Official", StringComparison.OrdinalIgnoreCase))
-            score += 100;
-
         var formats = release.Media?
             .Select(m => m.Format)
             .Where(f => !string.IsNullOrWhiteSpace(f))
             .Select(f => f!)
             .ToList() ?? [];
+
+        return ScoreReleaseLayout(
+            release.Status,
+            release.Media?.Count ?? 0,
+            release.Media?.Sum(m => m.TrackCount) ?? 0,
+            formats,
+            hints);
+    }
+
+    /// <summary>
+    /// Scores a release against on-disk layout. Disc + track count dominate when hints exist
+    /// so a 10+12 deluxe beats a 16-track single disc (and a stale preferred release id).
+    /// </summary>
+    internal static int ScoreReleaseLayout(
+        string? status,
+        int mediaCount,
+        int trackCount,
+        IReadOnlyList<string> formats,
+        MusicAlbumReleaseHints? hints)
+    {
+        var score = 0;
+        if (string.Equals(status, "Official", StringComparison.OrdinalIgnoreCase))
+            score += 100;
 
         if (formats.Any(f => f.Contains("Digital", StringComparison.OrdinalIgnoreCase)
                              || f.Contains("File", StringComparison.OrdinalIgnoreCase)))
@@ -476,13 +506,28 @@ public class MusicBrainzMetadataProvider : IMetadataProvider<ExternalMusicAlbumM
         else if (formats.Any(f => f.Equals("CD", StringComparison.OrdinalIgnoreCase)))
             score += 10;
 
-        var trackCount = release.Media?.Sum(m => m.TrackCount) ?? 0;
+        if (hints?.ExpectedDiscCount is int expectedDiscs && expectedDiscs > 0 && mediaCount > 0)
+        {
+            var discDelta = Math.Abs(mediaCount - expectedDiscs);
+            if (discDelta == 0)
+                score += 200;
+            else if (discDelta == 1)
+                score += 40;
+            else
+                score -= discDelta * 40;
+        }
+
         if (hints?.ExpectedTrackCount is int expected && expected > 0 && trackCount > 0)
         {
             var delta = Math.Abs(trackCount - expected);
-            score += Math.Max(0, 120 - delta * 15);
+            if (delta == 0)
+                score += 180;
+            else if (delta <= 2)
+                score += 100;
+            else
+                score += Math.Max(0, 80 - delta * 20);
         }
-        else
+        else if (!HasLayoutHints(hints))
         {
             // Without on-disk hints, prefer richer tracklists moderately
             score += Math.Min(trackCount, 40);
@@ -490,8 +535,6 @@ public class MusicBrainzMetadataProvider : IMetadataProvider<ExternalMusicAlbumM
 
         if (hints?.ExpectedTrackTitles is { Count: > 0 } titles && trackCount > 0)
         {
-            // Title overlap needs full release payloads; approximate with count proximity only.
-            // Bonus when track counts align closely with expected title count.
             var titleDelta = Math.Abs(trackCount - titles.Count);
             if (titleDelta == 0)
                 score += 40;
@@ -501,6 +544,73 @@ public class MusicBrainzMetadataProvider : IMetadataProvider<ExternalMusicAlbumM
 
         return score;
     }
+
+    private static MbReleaseSearchEntry PickBestSearchRelease(
+        IReadOnlyList<MbReleaseSearchEntry> candidates,
+        MediaIdentification identification)
+    {
+        var year = identification.ReleaseYear?.Year;
+        return candidates
+            .OrderByDescending(c => ScoreSearchRelease(c, identification))
+            .ThenByDescending(c => year is int y && ParseYear(c.Date) == y ? 1 : 0)
+            .ThenByDescending(c => c.Score)
+            .First();
+    }
+
+    private static int ScoreSearchRelease(MbReleaseSearchEntry release, MediaIdentification identification)
+    {
+        var mediaCount = release.Media?.Count ?? 0;
+        var trackCount = release.Media?.Sum(m => m.TrackCount)
+            ?? release.TrackCount
+            ?? 0;
+
+        return ScoreSearchReleaseLayout(
+            release.Score,
+            mediaCount,
+            trackCount,
+            identification.ExpectedDiscCount,
+            identification.ExpectedTrackCount);
+    }
+
+    internal static int ScoreSearchReleaseLayout(
+        int mbScore,
+        int mediaCount,
+        int trackCount,
+        int? expectedDiscCount,
+        int? expectedTrackCount)
+    {
+        var score = mbScore;
+
+        if (expectedDiscCount is int expectedDiscs && expectedDiscs > 0 && mediaCount > 0)
+        {
+            var discDelta = Math.Abs(mediaCount - expectedDiscs);
+            if (discDelta == 0)
+                score += 200;
+            else if (discDelta == 1)
+                score += 40;
+            else
+                score -= discDelta * 40;
+        }
+
+        if (expectedTrackCount is int expectedTracks && expectedTracks > 0 && trackCount > 0)
+        {
+            var delta = Math.Abs(trackCount - expectedTracks);
+            if (delta == 0)
+                score += 180;
+            else if (delta <= 2)
+                score += 100;
+            else
+                score += Math.Max(0, 80 - delta * 20);
+        }
+
+        return score;
+    }
+
+    private static bool HasLayoutHints(MusicAlbumReleaseHints? hints) =>
+        hints?.ExpectedTrackCount is > 0 || hints?.ExpectedDiscCount is > 0;
+
+    private static bool HasLayoutHints(MediaIdentification identification) =>
+        identification.ExpectedTrackCount is > 0 || identification.ExpectedDiscCount is > 0;
 
     private async Task<MbRelease?> GetReleaseAsync(string releaseId, CancellationToken cancellationToken)
     {
@@ -1026,6 +1136,9 @@ public class MusicBrainzMetadataProvider : IMetadataProvider<ExternalMusicAlbumM
         public int Score { get; init; }
         public string? Title { get; init; }
         public string? Date { get; init; }
+        [JsonPropertyName("track-count")]
+        public int? TrackCount { get; init; }
+        public List<MbMedium>? Media { get; init; }
         [JsonPropertyName("artist-credit")]
         public List<MbArtistCredit>? ArtistCredit { get; init; }
         [JsonPropertyName("release-group")]

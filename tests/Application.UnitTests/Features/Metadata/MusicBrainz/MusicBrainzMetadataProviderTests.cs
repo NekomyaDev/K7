@@ -133,4 +133,32 @@ public class MusicBrainzMetadataProviderTests
         MusicBrainzMetadataProvider.FindPreferredYearIndex([], preferredYear: 2000)
             .Should().BeNull();
     }
+
+    [Test]
+    public void ScoreReleaseLayout_ShouldPreferTwoDiscDeluxe_WhenLayoutHintsMatch()
+    {
+        var hints = new MusicAlbumReleaseHints
+        {
+            ExpectedTrackCount = 22,
+            ExpectedDiscCount = 2
+        };
+
+        var deluxe = MusicBrainzMetadataProvider.ScoreReleaseLayout(
+            "Official", mediaCount: 2, trackCount: 22, formats: ["CD", "CD"], hints);
+        var single = MusicBrainzMetadataProvider.ScoreReleaseLayout(
+            "Official", mediaCount: 1, trackCount: 16, formats: ["CD"], hints);
+
+        deluxe.Should().BeGreaterThan(single);
+    }
+
+    [Test]
+    public void ScoreSearchReleaseLayout_ShouldPreferMatchingTrackAndDiscCount()
+    {
+        var deluxe = MusicBrainzMetadataProvider.ScoreSearchReleaseLayout(
+            mbScore: 90, mediaCount: 2, trackCount: 22, expectedDiscCount: 2, expectedTrackCount: 22);
+        var single = MusicBrainzMetadataProvider.ScoreSearchReleaseLayout(
+            mbScore: 100, mediaCount: 1, trackCount: 16, expectedDiscCount: 2, expectedTrackCount: 22);
+
+        deluxe.Should().BeGreaterThan(single);
+    }
 }
