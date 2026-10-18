@@ -446,19 +446,34 @@ public class ReidentifyIndexedFileCommandHandler(
 
         var identification = indexedFile.Identification;
         var trackTitle = identification?.Title ?? indexedFile.Name;
-        var trackNumber = identification?.TrackNumber;
+        var (discNumber, trackNumber) = MusicDiscTrackParser.Resolve(
+            identification?.DiscNumber,
+            identification?.TrackNumber,
+            indexedFile.Name,
+            indexedFile.ParentDirectory);
 
-        var existingTrack = album.Tracks.FirstOrDefault(t =>
-            !t.IndexedFiles.Any()
-            && (t.TrackNumber == trackNumber
-                || string.Equals(t.Title, trackTitle, StringComparison.OrdinalIgnoreCase)))
-            ?? album.Tracks.FirstOrDefault(t =>
-                t.TrackNumber == trackNumber
-                || string.Equals(t.Title, trackTitle, StringComparison.OrdinalIgnoreCase));
+        // Disc+track, then title on the same disc only - never title across discs
+        // (deluxe releases repeat titles on Disc 2).
+        var existingTrack = MusicAlbumTrackMatchHelper.FindOnAlbum(
+                album.Tracks,
+                trackTitle,
+                trackNumber,
+                discNumber,
+                t => !t.IndexedFiles.Any())
+            ?? MusicAlbumTrackMatchHelper.FindOnAlbum(
+                album.Tracks,
+                trackTitle,
+                trackNumber,
+                discNumber);
 
         if (existingTrack is not null)
         {
-            existingTrack.IndexedFiles.Add(indexedFile);
+            if (!existingTrack.IndexedFiles.Any(f => f.Id == indexedFile.Id))
+                existingTrack.IndexedFiles.Add(indexedFile);
+            if (trackNumber is not null)
+                existingTrack.TrackNumber = trackNumber;
+            if (discNumber is not null)
+                existingTrack.DiscNumber = discNumber;
             return;
         }
 
@@ -467,6 +482,7 @@ public class ReidentifyIndexedFileCommandHandler(
             Title = trackTitle,
             SortTitle = MediaSortTitleHelper.Compute(trackTitle),
             TrackNumber = trackNumber,
+            DiscNumber = discNumber,
             ReleaseDate = identification?.ReleaseYear,
             AlbumId = album.Id,
             Album = album,

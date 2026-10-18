@@ -99,8 +99,12 @@ public static class SameAlbumDuplicateTrackRepairHelper
 
         foreach (var shell in shells)
         {
+            // Same disc only - deluxe albums repeat titles across discs.
+            var shellDisc = MusicAlbumTrackMatchHelper.NormalizeDisc(shell.DiscNumber);
             var hits = playable
-                .Where(t => ImportedMusicShellReattachHelper.TitlesMatch(shell.Title, t.Title, null, null))
+                .Where(t =>
+                    MusicAlbumTrackMatchHelper.NormalizeDisc(t.DiscNumber) == shellDisc
+                    && ImportedMusicShellReattachHelper.TitlesMatch(shell.Title, t.Title, null, null))
                 .ToList();
             if (hits.Count != 1)
                 continue;
@@ -203,16 +207,20 @@ public static class SameAlbumDuplicateTrackRepairHelper
 
     private static bool AreFormatDuplicates(MusicTrack left, MusicTrack right)
     {
-        if (ImportedMusicShellReattachHelper.TitlesMatch(left.Title, right.Title, null, null))
+        var sameDisc = NormalizeDisc(left.DiscNumber) == NormalizeDisc(right.DiscNumber);
+
+        // Title match only when both sides share a disc (studio vs live same title must not fold).
+        if (sameDisc
+            && ImportedMusicShellReattachHelper.TitlesMatch(left.Title, right.Title, null, null))
             return HasCompatibleFormats(left, right);
 
         if (left.TrackNumber is int leftTrack
             && right.TrackNumber == leftTrack
-            && NormalizeDisc(left.DiscNumber) == NormalizeDisc(right.DiscNumber)
+            && sameDisc
             && HasCompatibleFormats(left, right))
             return true;
 
-        return SameBasename(left, right) && HasCompatibleFormats(left, right);
+        return sameDisc && SameBasename(left, right) && HasCompatibleFormats(left, right);
     }
 
     private static bool HasCompatibleFormats(MusicTrack left, MusicTrack right)

@@ -224,9 +224,20 @@ public class RefreshMediaMetadatasCommandHandler : IRequestHandler<RefreshMediaM
             if (candidateTracks.Count == 0)
                 candidateTracks = album.Tracks.ToList();
 
+            // Prefer on-disk file count over MusicTrack row count: a prior title-only merge
+            // can leave 22 files on 16 rows and would otherwise hint a 16-track single disc.
+            var fileCount = candidateTracks.Sum(t => t.IndexedFiles.Count);
+            var layoutTrackCount = fileCount > 0 ? fileCount : candidateTracks.Count;
+
+            var discCount = candidateTracks
+                .Select(t => MusicAlbumTrackMatchHelper.NormalizeDisc(t.DiscNumber))
+                .Distinct()
+                .Count();
+
             releaseHints = new MusicAlbumReleaseHints
             {
-                ExpectedTrackCount = candidateTracks.Count > 0 ? candidateTracks.Count : null,
+                ExpectedTrackCount = layoutTrackCount > 0 ? layoutTrackCount : null,
+                ExpectedDiscCount = candidateTracks.Count > 0 ? discCount : null,
                 ExpectedTrackTitles = candidateTracks
                     .Where(t => !string.IsNullOrWhiteSpace(t.Title))
                     .Select(t => t.Title!)
@@ -249,28 +260,13 @@ public class RefreshMediaMetadatasCommandHandler : IRequestHandler<RefreshMediaM
                 MetadataTagBuilder.FromMusicAlbumMetadata(metadata, album),
                 cancellationToken);
 
-            // Federation: create tracks and artist from peer metadata (no local scan to do it)
+            // Create missing disc+track shells from the chosen release (deluxe 10+12, etc.).
+            // Local libraries previously only stamped ids onto existing file-backed rows.
+            EnsureAlbumTracklistShells(album, metadata);
+
+            // Federation: re-parent remote files and fill artist when the peer album has no local scan.
             if (request.MetadataProviderName == "federation")
             {
-                if (album.Tracks.Count == 0 && metadata.Tracks is { Count: > 0 })
-                {
-                    foreach (var trackMeta in metadata.Tracks)
-                    {
-                        var track = new MusicTrack
-                        {
-                            AlbumId = album.Id,
-                            Title = trackMeta.Title,
-                            SortTitle = trackMeta.SortTitle ?? MediaSortTitleHelper.Compute(trackMeta.Title),
-                            TrackNumber = trackMeta.TrackNumber,
-                            DiscNumber = trackMeta.DiscNumber,
-                        };
-                        _context.Medias.Add(track);
-                        album.Tracks.Add(track);
-                    }
-                    await _context.SaveChangesAsync(cancellationToken);
-                }
-
-                // Re-parent RemoteIndexedFiles from album to individual tracks
                 if (album.Tracks.Count > 0 && metadata.Tracks is { Count: > 0 })
                 {
                     var albumRemoteFiles = await _context.RemoteIndexedFiles
@@ -281,9 +277,11 @@ public class RefreshMediaMetadatasCommandHandler : IRequestHandler<RefreshMediaM
                     {
                         if (trackMeta.RemoteId is null) continue;
 
-                        var localTrack = album.Tracks.FirstOrDefault(t =>
-                            t.TrackNumber == trackMeta.TrackNumber
-                            || string.Equals(t.Title, trackMeta.Title, StringComparison.OrdinalIgnoreCase));
+                        var localTrack = MusicAlbumTrackMatchHelper.FindOnAlbum(
+                            album.Tracks,
+                            trackMeta.Title,
+                            trackMeta.TrackNumber,
+                            trackMeta.DiscNumber);
 
                         if (localTrack is null) continue;
 
@@ -306,6 +304,52 @@ public class RefreshMediaMetadatasCommandHandler : IRequestHandler<RefreshMediaM
             await EnrichArtistsAsync(album, metadata, request.Language, cancellationToken);
             await PersistTrackExternalIdsAsync(album, metadata, cancellationToken);
             await SyncTrackArtistCreditsAsync(album, metadata, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Ensures every MusicBrainz medium/track slot exists as a local MusicTrack row
+    /// (file-less shells for missing files). Match by disc+track only - never by title alone.
+    /// </summary>
+    private void EnsureAlbumTracklistShells(MusicAlbum album, ExternalMusicAlbumMetadata metadata)
+    {
+        if (metadata.Tracks is not { Count: > 0 })
+            return;
+
+        foreach (var existing in album.Tracks)
+        {
+            if (!string.IsNullOrWhiteSpace(existing.Title)
+                || existing.IsFieldLocked(nameof(MusicTrack.Title)))
+                continue;
+
+            var meta = MusicAlbumTrackMatchHelper.FindMetadataTrack(
+                metadata.Tracks,
+                existing.DiscNumber,
+                existing.TrackNumber,
+                existing.Title,
+                mt => mt.DiscNumber,
+                mt => mt.TrackNumber,
+                mt => mt.Title);
+            if (meta?.Title is null)
+                continue;
+
+            existing.Title = meta.Title;
+            existing.SortTitle = meta.SortTitle ?? MediaSortTitleHelper.Compute(meta.Title);
+        }
+
+        var shells = MusicAlbumTrackMatchHelper.CreateMissingTrackShells(
+            album.Id,
+            album.Tracks,
+            metadata.Tracks.Select(mt => (
+                mt.DiscNumber,
+                mt.TrackNumber,
+                (string?)mt.Title,
+                (string?)mt.SortTitle)));
+
+        foreach (var track in shells)
+        {
+            _context.Medias.Add(track);
+            album.Tracks.Add(track);
         }
     }
 
@@ -775,13 +819,14 @@ public class RefreshMediaMetadatasCommandHandler : IRequestHandler<RefreshMediaM
         {
             if (track.IsFieldLocked(nameof(MusicTrack.ExternalIds))) continue;
 
-            var metadataTrack = metadata.Tracks.FirstOrDefault(mt =>
-                    mt.DiscNumber == track.DiscNumber && mt.TrackNumber == track.TrackNumber)
-                ?? metadata.Tracks.FirstOrDefault(mt =>
-                    mt.TrackNumber == track.TrackNumber
-                    && string.Equals(mt.Title, track.Title, StringComparison.OrdinalIgnoreCase))
-                ?? metadata.Tracks.FirstOrDefault(mt =>
-                    string.Equals(mt.Title, track.Title, StringComparison.OrdinalIgnoreCase));
+            var metadataTrack = MusicAlbumTrackMatchHelper.FindMetadataTrack(
+                metadata.Tracks,
+                track.DiscNumber,
+                track.TrackNumber,
+                track.Title,
+                mt => mt.DiscNumber,
+                mt => mt.TrackNumber,
+                mt => mt.Title);
 
             if (metadataTrack is null) continue;
 
@@ -943,9 +988,14 @@ public class RefreshMediaMetadatasCommandHandler : IRequestHandler<RefreshMediaM
         {
             if (track.ArtistCredits.Count > 0) continue;
 
-            var metadataTrack = metadata.Tracks.FirstOrDefault(mt =>
-                mt.TrackNumber == track.TrackNumber
-                || string.Equals(mt.Title, track.Title, StringComparison.OrdinalIgnoreCase));
+            var metadataTrack = MusicAlbumTrackMatchHelper.FindMetadataTrack(
+                metadata.Tracks,
+                track.DiscNumber,
+                track.TrackNumber,
+                track.Title,
+                mt => mt.DiscNumber,
+                mt => mt.TrackNumber,
+                mt => mt.Title);
 
             if (metadataTrack?.ArtistCredits is not { Count: > 0 }) continue;
 

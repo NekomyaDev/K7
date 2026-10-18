@@ -103,6 +103,38 @@ public class SameAlbumDuplicateTrackRepairHelperTests
         (await _context.Medias.OfType<MusicTrack>().AnyAsync(t => t.Id == mp3Track.Id)).Should().BeFalse();
     }
 
+    [Test]
+    public async Task RepairAsync_ShouldNotFoldSameTitle_AcrossDiscs()
+    {
+        var album = new MusicAlbum { Title = "Breakfast in America" };
+        var studio = new MusicTrack
+        {
+            Title = "Goodbye Stranger",
+            Album = album,
+            DiscNumber = 1,
+            TrackNumber = 3
+        };
+        var live = new MusicTrack
+        {
+            Title = "Goodbye Stranger",
+            Album = album,
+            DiscNumber = 2,
+            TrackNumber = 2
+        };
+        _context.Medias.AddRange(album, studio, live);
+        await _context.SaveChangesAsync();
+
+        AddFile(studio.Id, "/music/Supertramp/BIA/Disc 1/03 - Goodbye Stranger.flac", ".flac", 20_000);
+        AddFile(live.Id, "/music/Supertramp/BIA/Disc 2/02 - Goodbye Stranger.flac", ".flac", 18_000);
+        await _context.SaveChangesAsync();
+
+        var result = await SameAlbumDuplicateTrackRepairHelper.RepairAsync(_context, _logger);
+
+        result.FormatDuplicatesFolded.Should().Be(0);
+        result.FileLessFolded.Should().Be(0);
+        (await _context.Medias.OfType<MusicTrack>().CountAsync()).Should().Be(2);
+    }
+
     private Guid AddFile(Guid mediaId, string path, string extension, long size)
     {
         var id = Guid.NewGuid();

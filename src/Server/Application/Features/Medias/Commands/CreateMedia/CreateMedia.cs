@@ -286,6 +286,10 @@ public class CreateMediaCommandHandler : IRequestHandler<CreateMediaCommand, Gui
             releaseYear,
             firstTags,
             firstIdentification);
+        // Prefer a release MBID from any file in the batch (first file may lack tags).
+        albumIdentification.MusicBrainzReleaseId ??= FindReleaseIdInBatch(indexedFiles);
+        albumIdentification.MusicBrainzReleaseGroupId ??= FindReleaseGroupIdInBatch(indexedFiles);
+        ApplyOnDiskLayoutHints(albumIdentification, indexedFiles);
 
         var identityMatch = await _musicIdentityService.ResolveAlbumAsync(
             albumIdentification,
@@ -339,24 +343,29 @@ public class CreateMediaCommandHandler : IRequestHandler<CreateMediaCommand, Gui
 
         MusicAlbum album;
         var isNewAlbum = false;
-        var shouldRefreshPreservedAlbum = false;
+        // Rematch always re-queues metadata so release pick / disc layout can catch up
+        // (reusing the former album used to skip refresh when the release-group id was unchanged).
+        var isRematch = formerMediaIdsByIndexedFileId is { Count: > 0 };
+        var shouldRefreshPreservedAlbum = isRematch;
 
         if (canReuseFormerAlbum)
         {
             album = preferredFormerAlbum!;
             if (!string.IsNullOrEmpty(metadataProviderExternalId))
-                shouldRefreshPreservedAlbum = UpsertExternalId(album, albumProviderName, metadataProviderExternalId);
+                shouldRefreshPreservedAlbum |= UpsertExternalId(album, albumProviderName, metadataProviderExternalId);
         }
         else if (existingAlbumByExternalId is not null)
         {
             album = existingAlbumByExternalId;
+            if (isRematch && !string.IsNullOrEmpty(metadataProviderExternalId))
+                UpsertExternalId(album, albumProviderName, metadataProviderExternalId);
         }
         else
         {
             (album, isNewAlbum) = await FindOrCreateAlbumAsync(
                 firstFile, albumName, albumArtistName, releaseYear, cancellationToken);
             if (!isNewAlbum && !string.IsNullOrEmpty(metadataProviderExternalId))
-                shouldRefreshPreservedAlbum = UpsertExternalId(album, albumProviderName, metadataProviderExternalId);
+                shouldRefreshPreservedAlbum |= UpsertExternalId(album, albumProviderName, metadataProviderExternalId);
         }
 
         if (isNewAlbum)
@@ -393,6 +402,7 @@ public class CreateMediaCommandHandler : IRequestHandler<CreateMediaCommand, Gui
         }
         else if (shouldRefreshPreservedAlbum && !string.IsNullOrEmpty(metadataProviderExternalId))
         {
+            // Prefer embedded MUSICBRAINZ_ALBUMID over a stale musicbrainz-release from a prior bad pick.
             if (!string.IsNullOrWhiteSpace(identityMatch?.PreferredReleaseId))
                 UpsertExternalId(album, "musicbrainz-release", identityMatch.PreferredReleaseId);
 
@@ -424,14 +434,22 @@ public class CreateMediaCommandHandler : IRequestHandler<CreateMediaCommand, Gui
 
             var tags = _audioTagReader.ReadTags(indexedFile.Path);
             var trackTitle = tags?.Title ?? identification.Title;
-            var trackNumber = tags?.TrackNumber ?? identification.TrackNumber;
+            // Complete tags win. Path fills gaps. Identification last resort.
+            var (discNumber, trackNumber) = MusicDiscTrackParser.Resolve(
+                tags?.DiscNumber,
+                tags?.TrackNumber,
+                indexedFile.Name,
+                indexedFile.ParentDirectory);
+            discNumber ??= identification.DiscNumber;
+            trackNumber ??= identification.TrackNumber;
 
             var formerTrackId = ResolveFormerMediaId(indexedFile, formerMediaIdsByIndexedFileId);
             var formerTrack = formerTrackId is Guid fid
                 ? formerTracks.FirstOrDefault(t => t.Id == fid)
                 : null;
 
-            // Rematch / reidentify: reparent the former track so AudioMuse and OpenSubsonic Guids stay stable.
+            // Rematch / reidentify: keep Guids when the former row is still the right disc+track slot.
+            // If two files previously shared one MusicTrack (title-only merge across discs), split them.
             if (formerTrack is not null)
             {
                 if (formerAlbumIdByTrackId.TryGetValue(formerTrack.Id, out var previousAlbumId)
@@ -444,17 +462,31 @@ public class CreateMediaCommandHandler : IRequestHandler<CreateMediaCommand, Gui
                         album.Tracks.Add(formerTrack);
                 }
 
-                if (!formerTrack.IndexedFiles.Any(f => f.Id == indexedFile.Id))
-                    formerTrack.IndexedFiles.Add(indexedFile);
+                var target = ResolveRematchTrackTarget(
+                    album,
+                    formerTrack,
+                    indexedFile,
+                    trackTitle,
+                    trackNumber,
+                    discNumber);
+
+                if (target.Id != formerTrack.Id)
+                    formerTrack.IndexedFiles.Remove(indexedFile);
+
+                if (!target.IndexedFiles.Any(f => f.Id == indexedFile.Id))
+                    target.IndexedFiles.Add(indexedFile);
 
                 if (!string.IsNullOrWhiteSpace(trackTitle))
                 {
-                    formerTrack.Title = trackTitle;
-                    formerTrack.SortTitle = MediaSortTitleHelper.Compute(trackTitle);
+                    target.Title = trackTitle;
+                    target.SortTitle = MediaSortTitleHelper.Compute(trackTitle);
                 }
 
                 if (trackNumber is not null)
-                    formerTrack.TrackNumber = trackNumber;
+                    target.TrackNumber = trackNumber;
+
+                if (discNumber is not null)
+                    target.DiscNumber = discNumber;
 
                 continue;
             }
@@ -469,6 +501,7 @@ public class CreateMediaCommandHandler : IRequestHandler<CreateMediaCommand, Gui
                     tags,
                     trackTitle,
                     trackNumber,
+                    discNumber,
                     vacatedAlbumIds);
                 continue;
             }
@@ -476,14 +509,15 @@ public class CreateMediaCommandHandler : IRequestHandler<CreateMediaCommand, Gui
             // Re-link to existing orphan track (no IndexedFiles) when album was reused
             if (!isNewAlbum)
             {
-                var existingTrack = album.Tracks.FirstOrDefault(t =>
-                    !t.IndexedFiles.Any()
-                    && (t.TrackNumber == trackNumber
-                        || string.Equals(t.Title, trackTitle, StringComparison.OrdinalIgnoreCase)));
+                var existingTrack = FindOrphanTrackOnAlbum(album, trackTitle, trackNumber, discNumber);
 
                 if (existingTrack is not null)
                 {
                     existingTrack.IndexedFiles.Add(indexedFile);
+                    if (trackNumber is not null)
+                        existingTrack.TrackNumber = trackNumber;
+                    if (discNumber is not null)
+                        existingTrack.DiscNumber = discNumber;
                     continue;
                 }
             }
@@ -493,7 +527,7 @@ public class CreateMediaCommandHandler : IRequestHandler<CreateMediaCommand, Gui
                 Title = trackTitle,
                 SortTitle = MediaSortTitleHelper.Compute(trackTitle),
                 TrackNumber = trackNumber,
-                DiscNumber = tags?.DiscNumber,
+                DiscNumber = discNumber,
                 ReleaseDate = tags?.Year != null ? new DateOnly(tags.Year.Value, 1, 1) : identification.ReleaseYear,
                 Lyrics = tags?.Lyrics,
                 AlbumId = album.Id,
@@ -663,6 +697,7 @@ public class CreateMediaCommandHandler : IRequestHandler<CreateMediaCommand, Gui
         AudioTagData? tags,
         string? trackTitle,
         int? trackNumber,
+        int? discNumber,
         HashSet<Guid> vacatedAlbumIds)
     {
         var isVirtual = !track.IndexedFiles.Any();
@@ -672,7 +707,7 @@ public class CreateMediaCommandHandler : IRequestHandler<CreateMediaCommand, Gui
         // with the same ISRC/recording id would leave two rows for the same song.
         if (isVirtual && track.AlbumId != album.Id)
         {
-            var localPlayable = FindPlayableTrackOnAlbum(album, trackTitle, trackNumber, tags?.DiscNumber);
+            var localPlayable = FindPlayableTrackOnAlbum(album, trackTitle, trackNumber, discNumber);
             if (localPlayable is not null)
             {
                 target = localPlayable;
@@ -700,6 +735,9 @@ public class CreateMediaCommandHandler : IRequestHandler<CreateMediaCommand, Gui
         if (isVirtual && trackNumber is not null)
             target.TrackNumber = trackNumber;
 
+        if (isVirtual && discNumber is not null)
+            target.DiscNumber = discNumber;
+
         if (!string.IsNullOrWhiteSpace(tags?.Isrc))
             UpsertExternalId(target, "isrc", tags.Isrc);
 
@@ -707,22 +745,79 @@ public class CreateMediaCommandHandler : IRequestHandler<CreateMediaCommand, Gui
             UpsertExternalId(target, "musicbrainz", tags.MusicBrainzRecordingId);
     }
 
+    private static MusicTrack? FindOrphanTrackOnAlbum(
+        MusicAlbum album,
+        string? trackTitle,
+        int? trackNumber,
+        int? discNumber) =>
+        MusicAlbumTrackMatchHelper.FindOnAlbum(
+            album.Tracks,
+            trackTitle,
+            trackNumber,
+            discNumber,
+            t => !t.IndexedFiles.Any());
+
     private static MusicTrack? FindPlayableTrackOnAlbum(
         MusicAlbum album,
         string? trackTitle,
         int? trackNumber,
+        int? discNumber) =>
+        MusicAlbumTrackMatchHelper.FindOnAlbum(
+            album.Tracks,
+            trackTitle,
+            trackNumber,
+            discNumber,
+            t => t.IndexedFiles.Any() || t.RemoteIndexedFiles.Any());
+
+    /// <summary>
+    /// Picks where a rematched file should land. Prefer an existing disc+track slot.
+    /// If the former track already holds another file and this file resolves to a different
+    /// disc+track (classic studio+live title merge), create a new row instead of fusing again.
+    /// </summary>
+    private MusicTrack ResolveRematchTrackTarget(
+        MusicAlbum album,
+        MusicTrack formerTrack,
+        IndexedFile indexedFile,
+        string? trackTitle,
+        int? trackNumber,
         int? discNumber)
     {
-        var disc = discNumber is null or < 1 ? 1 : discNumber.Value;
-        return album.Tracks.FirstOrDefault(t =>
-            (t.IndexedFiles.Any() || t.RemoteIndexedFiles.Any())
-            && trackNumber is int number
-            && t.TrackNumber == number
-            && (t.DiscNumber is null or < 1 ? 1 : t.DiscNumber.Value) == disc)
-            ?? album.Tracks.FirstOrDefault(t =>
-                (t.IndexedFiles.Any() || t.RemoteIndexedFiles.Any())
-                && !string.IsNullOrWhiteSpace(trackTitle)
-                && string.Equals(t.Title, trackTitle, StringComparison.OrdinalIgnoreCase));
+        var disc = MusicAlbumTrackMatchHelper.NormalizeDisc(discNumber);
+
+        var slotMatch = MusicAlbumTrackMatchHelper.FindOnAlbum(
+            album.Tracks,
+            trackTitle,
+            trackNumber,
+            discNumber);
+        if (slotMatch is not null && slotMatch.Id != formerTrack.Id)
+            return slotMatch;
+
+        var otherFilesOnFormer = formerTrack.IndexedFiles.Any(f => f.Id != indexedFile.Id);
+        var formerSlotMatches = trackNumber is int number
+            && formerTrack.TrackNumber == number
+            && MusicAlbumTrackMatchHelper.NormalizeDisc(formerTrack.DiscNumber) == disc;
+
+        if (!MusicAlbumTrackMatchHelper.ShouldSplitFusedFormerTrack(
+                hasOtherSlotMatch: false,
+                otherFilesOnFormer,
+                formerSlotMatches,
+                trackNumber is not null))
+            return formerTrack;
+
+        // Split a prior cross-disc title merge into its own MusicTrack.
+        var split = new MusicTrack
+        {
+            Title = trackTitle,
+            SortTitle = MediaSortTitleHelper.Compute(trackTitle),
+            TrackNumber = trackNumber,
+            DiscNumber = discNumber,
+            AlbumId = album.Id,
+            Album = album,
+            IndexedFiles = []
+        };
+        album.Tracks.Add(split);
+        _context.Medias.Add(split);
+        return split;
     }
 
     private static bool UpsertExternalId(BaseMedia media, string providerName, string value)
@@ -1207,6 +1302,73 @@ public class CreateMediaCommandHandler : IRequestHandler<CreateMediaCommand, Gui
             MusicBrainzAlbumArtistId = FirstNonEmpty(tags?.MusicBrainzAlbumArtistId, fallback.MusicBrainzAlbumArtistId),
             MusicBrainzRecordingId = FirstNonEmpty(tags?.MusicBrainzRecordingId, fallback.MusicBrainzRecordingId)
         };
+    }
+
+    /// <summary>
+    /// Feed local file count / distinct discs into MusicBrainz release picking
+    /// (deluxe 10+12 vs a single-disc remaster with a different track total).
+    /// Path disc signals (Disc N folder / DDTT) count even when tags say disc 1.
+    /// </summary>
+    private void ApplyOnDiskLayoutHints(MediaIdentification identification, List<IndexedFile> indexedFiles)
+    {
+        if (indexedFiles.Count == 0)
+            return;
+
+        identification.ExpectedTrackCount = indexedFiles.Count;
+        var discs = new HashSet<int>();
+        foreach (var indexedFile in indexedFiles)
+        {
+            var tags = _audioTagReader.ReadTags(indexedFile.Path, includeCoverArt: false);
+            var (disc, _) = MusicDiscTrackParser.Resolve(
+                tags?.DiscNumber,
+                tags?.TrackNumber,
+                indexedFile.Name,
+                indexedFile.ParentDirectory);
+            disc ??= indexedFile.Identification?.DiscNumber;
+            discs.Add(MusicAlbumTrackMatchHelper.NormalizeDisc(disc));
+
+            // Multi-disc folder / filename layout still counts toward ExpectedDiscCount
+            // when embedded tags flatten everything to disc 1.
+            var fromName = MusicDiscTrackParser.TryParseFileName(indexedFile.Name);
+            if (fromName?.DiscNumber is int fileDisc)
+                discs.Add(fileDisc);
+            if (MusicDiscTrackParser.TryParseDiscFromDirectory(indexedFile.ParentDirectory) is int folderDisc)
+                discs.Add(folderDisc);
+        }
+
+        identification.ExpectedDiscCount = discs.Count;
+    }
+
+    private string? FindReleaseIdInBatch(List<IndexedFile> indexedFiles)
+    {
+        foreach (var indexedFile in indexedFiles)
+        {
+            var fromId = indexedFile.Identification?.MusicBrainzReleaseId;
+            if (!string.IsNullOrWhiteSpace(fromId))
+                return fromId.Trim();
+
+            var tags = _audioTagReader.ReadTags(indexedFile.Path, includeCoverArt: false);
+            if (!string.IsNullOrWhiteSpace(tags?.MusicBrainzReleaseId))
+                return tags.MusicBrainzReleaseId.Trim();
+        }
+
+        return null;
+    }
+
+    private string? FindReleaseGroupIdInBatch(List<IndexedFile> indexedFiles)
+    {
+        foreach (var indexedFile in indexedFiles)
+        {
+            var fromId = indexedFile.Identification?.MusicBrainzReleaseGroupId;
+            if (!string.IsNullOrWhiteSpace(fromId))
+                return fromId.Trim();
+
+            var tags = _audioTagReader.ReadTags(indexedFile.Path, includeCoverArt: false);
+            if (!string.IsNullOrWhiteSpace(tags?.MusicBrainzReleaseGroupId))
+                return tags.MusicBrainzReleaseGroupId.Trim();
+        }
+
+        return null;
     }
 
     private static string? FirstNonEmpty(params string?[] values) =>
