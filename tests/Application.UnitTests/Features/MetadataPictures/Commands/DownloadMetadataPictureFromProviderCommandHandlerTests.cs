@@ -111,6 +111,20 @@ public class DownloadMetadataPictureFromProviderCommandHandlerTests
         await _sender.DidNotReceive().Send(Arg.Any<IRequest>(), Arg.Any<CancellationToken>());
     }
 
+    [Test]
+    public async Task Handle_ShouldCancel_WhenPictureNoLongerExists()
+    {
+        var missingId = Guid.NewGuid();
+
+        await _handler.Handle(new DownloadMetadataPictureFromProviderCommand { Id = missingId }, CancellationToken.None);
+
+        _taskExecutionContext.IsCancelled.Should().BeTrue();
+        _taskExecutionContext.CancellationDetails.Should().Contain("no longer exists");
+        _httpClientFactory.DidNotReceive().CreateClient(Arg.Any<string>());
+        await _sender.DidNotReceive().Send(Arg.Any<IRequest>(), Arg.Any<CancellationToken>());
+        await _context.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
     private sealed class StubHttpMessageHandler(HttpStatusCode statusCode) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(

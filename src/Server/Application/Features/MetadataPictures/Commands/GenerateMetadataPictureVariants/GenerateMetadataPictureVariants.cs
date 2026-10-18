@@ -22,19 +22,22 @@ public class GenerateMetadataPictureVariantsCommandHandler : IRequestHandler<Gen
     private readonly PathsConfiguration _pathsConfiguration;
     private readonly ILogger<GenerateMetadataPictureVariantsCommandHandler> _logger;
     private readonly MediaPictureReadyNotifier _pictureReadyNotifier;
+    private readonly IBackgroundTaskExecutionContext _taskExecutionContext;
 
     public GenerateMetadataPictureVariantsCommandHandler(
         IApplicationDbContext context,
         IImageProcessor imageProcessor,
         IOptions<PathsConfiguration> pathsConfiguration,
         ILogger<GenerateMetadataPictureVariantsCommandHandler> logger,
-        MediaPictureReadyNotifier pictureReadyNotifier)
+        MediaPictureReadyNotifier pictureReadyNotifier,
+        IBackgroundTaskExecutionContext taskExecutionContext)
     {
         _context = context;
         _imageProcessor = imageProcessor;
         _pathsConfiguration = pathsConfiguration.Value;
         _logger = logger;
         _pictureReadyNotifier = pictureReadyNotifier;
+        _taskExecutionContext = taskExecutionContext;
     }
 
     public async Task Handle(GenerateMetadataPictureVariantsCommand request, CancellationToken cancellationToken)
@@ -43,7 +46,15 @@ public class GenerateMetadataPictureVariantsCommandHandler : IRequestHandler<Gen
             .Include(p => p.Variants)
             .FirstOrDefaultAsync(p => p.Id == request.MetadataPictureId, cancellationToken);
 
-        Guard.Against.NotFound(request.MetadataPictureId, picture);
+        // Picture may have been replaced/removed while this task was queued.
+        if (picture is null)
+        {
+            _logger.LogInformation(
+                "MetadataPicture {PictureId} no longer exists; cancelling variant generation",
+                request.MetadataPictureId);
+            _taskExecutionContext.Cancel("Metadata picture no longer exists.");
+            return;
+        }
 
         if (picture.LocalPath is null || !File.Exists(picture.LocalPath))
         {

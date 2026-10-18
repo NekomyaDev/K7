@@ -1,4 +1,5 @@
 using K7.Server.Application.Common;
+using K7.Server.Domain.Entities;
 using K7.Server.Domain.Enums;
 using K7.Shared.Dtos.Entities.Metadatas;
 using K7.Shared.Helpers;
@@ -130,6 +131,28 @@ public static class MetadataImageUrlHelper
             MetadataProviderHostMapper.FromUri(originalRemoteUri),
             MetadataProviderNames.Tvdb,
             StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// True when a local file already exists on disk for the same remote URI, so refresh can
+    /// skip deleting and re-queuing a download. A DB LocalPath alone is not enough: if the
+    /// file was deleted, refresh must re-download.
+    /// </summary>
+    public static bool HasDownloadedPictureWithRemoteUri(
+        IEnumerable<MetadataPicture> pictures,
+        MetadataPictureType type,
+        Uri remoteUri)
+    {
+        var remote = remoteUri.AbsoluteUri;
+        return pictures.Any(picture =>
+            picture.Type == type
+            && picture.OriginalRemoteUri is not null
+            && string.Equals(
+                picture.OriginalRemoteUri.AbsoluteUri,
+                remote,
+                StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(picture.LocalPath)
+            && File.Exists(picture.LocalPath));
     }
 
     public static IReadOnlyList<ProviderImageDto> FilterProviderImages(IEnumerable<ProviderImageDto> images) =>

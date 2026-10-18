@@ -1,4 +1,5 @@
 using K7.Server.Application.Helpers;
+using K7.Server.Domain.Entities;
 using K7.Server.Domain.Enums;
 using K7.Shared.Dtos.Entities.Metadatas;
 
@@ -208,6 +209,68 @@ public class MetadataImageUrlHelperTests
             .Should().BeFalse();
 
         MetadataImageUrlHelper.ShouldReplaceEpisodeStillWithHdAlternate(null, null, null)
+            .Should().BeFalse();
+    }
+
+    [Test]
+    public void HasDownloadedPictureWithRemoteUri_ShouldBeTrue_WhenLocalFileMatchesUri()
+    {
+        var uri = new Uri("https://image.tmdb.org/t/p/original/still.jpg");
+        var tempFile = Path.Combine(Path.GetTempPath(), $"k7-still-{Guid.NewGuid():N}.webp");
+        File.WriteAllText(tempFile, "x");
+        try
+        {
+            var pictures = new List<MetadataPicture>
+            {
+                new()
+                {
+                    Type = MetadataPictureType.Still,
+                    OriginalRemoteUri = uri,
+                    LocalPath = tempFile
+                }
+            };
+
+            MetadataImageUrlHelper.HasDownloadedPictureWithRemoteUri(pictures, MetadataPictureType.Still, uri)
+                .Should().BeTrue();
+        }
+        finally
+        {
+            File.Delete(tempFile);
+        }
+    }
+
+    [Test]
+    public void HasDownloadedPictureWithRemoteUri_ShouldBeFalse_WhenLocalPathMissing()
+    {
+        var uri = new Uri("https://image.tmdb.org/t/p/original/still.jpg");
+        var pictures = new List<MetadataPicture>
+        {
+            new()
+            {
+                Type = MetadataPictureType.Still,
+                OriginalRemoteUri = uri
+            }
+        };
+
+        MetadataImageUrlHelper.HasDownloadedPictureWithRemoteUri(pictures, MetadataPictureType.Still, uri)
+            .Should().BeFalse();
+    }
+
+    [Test]
+    public void HasDownloadedPictureWithRemoteUri_ShouldBeFalse_WhenLocalPathPointsToMissingFile()
+    {
+        var uri = new Uri("https://image.tmdb.org/t/p/original/still.jpg");
+        var pictures = new List<MetadataPicture>
+        {
+            new()
+            {
+                Type = MetadataPictureType.Still,
+                OriginalRemoteUri = uri,
+                LocalPath = Path.Combine(Path.GetTempPath(), $"k7-missing-{Guid.NewGuid():N}.webp")
+            }
+        };
+
+        MetadataImageUrlHelper.HasDownloadedPictureWithRemoteUri(pictures, MetadataPictureType.Still, uri)
             .Should().BeFalse();
     }
 }

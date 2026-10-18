@@ -66,6 +66,22 @@ public abstract class BaseMedia(MediaType type) : BaseAuditableEntity
             if (IsPictureTypeLocked(picture.Type))
                 continue;
 
+            // Keep already-downloaded artwork when the remote URI is unchanged and the file
+            // is still on disk. A stale LocalPath without a file must re-queue download.
+            var existing = Pictures.FirstOrDefault(p => p.Type == picture.Type);
+            if (existing is not null
+                && existing.OriginalRemoteUri is not null
+                && picture.OriginalRemoteUri is not null
+                && string.Equals(
+                    existing.OriginalRemoteUri.AbsoluteUri,
+                    picture.OriginalRemoteUri.AbsoluteUri,
+                    StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(existing.LocalPath)
+                && File.Exists(existing.LocalPath))
+            {
+                continue;
+            }
+
             RemovePicturesOfType(picture.Type);
             Pictures.Add(picture);
         }

@@ -65,7 +65,16 @@ public class DownloadMetadataPictureFromProviderCommandHandler : IRequestHandler
         var entity = await _context.MetadataPictures
             .Include(p => p.Variants)
             .FirstOrDefaultAsync(x => x.Id == request.Id, cancellationToken);
-        Guard.Against.NotFound(request.Id, entity);
+
+        // Picture may have been replaced/removed (e.g. cast refresh) while this task was queued.
+        if (entity is null)
+        {
+            _logger.LogInformation(
+                "Metadata picture {PictureId} no longer exists; cancelling download",
+                request.Id);
+            _taskExecutionContext.Cancel("Metadata picture no longer exists.");
+            return;
+        }
 
         try
         {

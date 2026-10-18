@@ -43,7 +43,10 @@ public class MusicAlbum() : BaseMedia(MediaType.MusicAlbum)
                 if (IsPictureTypeLocked(pic.Type))
                     continue;
 
-                var hasLocalCover = Pictures.Any(p => p.Type == MetadataPictureType.Cover && p.LocalPath is not null);
+                var hasLocalCover = Pictures.Any(p =>
+                    p.Type == MetadataPictureType.Cover
+                    && !string.IsNullOrWhiteSpace(p.LocalPath)
+                    && File.Exists(p.LocalPath));
                 if (hasLocalCover && pic.Type == MetadataPictureType.Cover)
                     continue;
 

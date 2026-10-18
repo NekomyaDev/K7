@@ -72,9 +72,17 @@ public class RefreshPersonMetadataCommandHandler(
             person.Gender = details.Gender;
 
         if (!string.IsNullOrEmpty(details.ImageUrl)
-            && MetadataImageUrlHelper.TryCreateRemoteUri(details.ImageUrl, out var imageUri))
+            && MetadataImageUrlHelper.TryCreateRemoteUri(details.ImageUrl, out var imageUri)
+            && imageUri is not null)
         {
-            if (person.PortraitPicture is null || person.PortraitPicture.OriginalRemoteUri != imageUri)
+            // Same remote URI with a local file: keep it. Re-queue only when missing or URI changed.
+            var keepExisting = person.PortraitPicture is not null
+                && MetadataImageUrlHelper.HasDownloadedPictureWithRemoteUri(
+                    [person.PortraitPicture],
+                    MetadataPictureType.Portrait,
+                    imageUri);
+
+            if (!keepExisting)
             {
                 var picture = new MetadataPicture
                 {
