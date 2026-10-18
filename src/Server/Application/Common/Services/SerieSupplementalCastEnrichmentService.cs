@@ -58,12 +58,15 @@ public sealed class SerieSupplementalCastEnrichmentService(
 
         if (enrichment.RolesToAppend.Count > 0)
         {
-            await ResolvePersonReferencesAsync(enrichment.RolesToAppend, cancellationToken);
+            await PersonRolePersonResolveHelper.ResolveAsync(
+                _context, enrichment.RolesToAppend, cancellationToken);
+            PersonRolePersonResolveHelper.PreferPersonLevelPortraits(enrichment.RolesToAppend);
             foreach (var role in enrichment.RolesToAppend)
                 serie.PersonRoles.Add(role);
         }
 
-        await ResolvePersonReferencesAsync(serie.PersonRoles, cancellationToken);
+        await PersonRolePersonResolveHelper.ResolveAsync(_context, serie.PersonRoles, cancellationToken);
+        PersonRolePersonResolveHelper.PreferPersonLevelPortraits(serie.PersonRoles);
 
         await _context.SaveChangesAsync(cancellationToken);
 
@@ -104,63 +107,12 @@ public sealed class SerieSupplementalCastEnrichmentService(
         if (episode.IsFieldLocked(nameof(SerieEpisode.PersonRoles)) || roles.Count == 0)
             return;
 
-        await ResolvePersonReferencesAsync(roles, cancellationToken);
-
+        await PersonRolePersonResolveHelper.ResolveAsync(_context, roles, cancellationToken);
+        PersonRolePersonResolveHelper.PreferPersonLevelPortraits(roles);
+        PersonRolePortraitReuseHelper.PreserveDownloadedPortraits(episode.PersonRoles, roles);
         episode.PersonRoles.Clear();
         foreach (var role in roles)
             episode.PersonRoles.Add(role);
     }
 
-    private async Task ResolvePersonReferencesAsync(IEnumerable<BasePersonRole> roles, CancellationToken cancellationToken)
-    {
-        foreach (var role in roles.ToList())
-        {
-            if (role.Person is null)
-                continue;
-
-            var matchedPersons = new List<Person>();
-            foreach (var externalId in role.Person.ExternalIds.ToList())
-            {
-                var match = await _context.Persons
-                    .Include(p => p.ExternalIds)
-                    .Include(p => p.PortraitPicture)
-                    .FirstOrDefaultAsync(p => p.ExternalIds.Any(e =>
-                        e.ProviderName == externalId.ProviderName && e.Value == externalId.Value),
-                        cancellationToken);
-                if (match is not null && matchedPersons.All(p => p.Id != match.Id))
-                    matchedPersons.Add(match);
-            }
-
-            Person? existingPerson = matchedPersons.Count > 0
-                ? PickCanonicalPerson(matchedPersons)
-                : await _context.Persons
-                    .Include(p => p.ExternalIds)
-                    .Include(p => p.PortraitPicture)
-                    .FirstOrDefaultAsync(p => p.Name == role.Person.Name, cancellationToken);
-
-            if (existingPerson is null)
-                continue;
-
-            await PersonMetadataMergeHelper.EnsurePortraitPictureLoadedAsync(
-                _context, existingPerson, cancellationToken);
-
-            foreach (var duplicate in matchedPersons.Where(p => !ReferenceEquals(p, existingPerson)))
-                PersonMetadataMergeHelper.MergeMissingPersonData(existingPerson, duplicate);
-
-            if (!ReferenceEquals(existingPerson, role.Person))
-                PersonMetadataMergeHelper.MergeMissingPersonData(existingPerson, role.Person);
-
-            role.Person = existingPerson;
-        }
-    }
-
-    private static Person PickCanonicalPerson(IReadOnlyList<Person> persons)
-    {
-        return persons
-            .OrderByDescending(p => p.ExternalIds.Any(e => e.ProviderName == "tmdb"))
-            .ThenByDescending(p => !string.IsNullOrWhiteSpace(p.Biography))
-            .ThenByDescending(p => p.Birthday.HasValue)
-            .ThenBy(p => p.Id)
-            .First();
-    }
 }

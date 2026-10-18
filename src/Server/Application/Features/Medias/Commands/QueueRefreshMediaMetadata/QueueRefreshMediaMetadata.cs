@@ -92,7 +92,10 @@ public class QueueRefreshMediaMetadataCommandHandler(
             MetadataProviderName = MetadataProviderHostMapper.NormalizeProviderName(refreshProviderName),
             WorkClass = BackgroundTaskWorkClass.CriticalEnrich,
             TriggeredBy = BackgroundTaskTriggeredBy.User,
-            MaxAttempts = 3
+            MaxAttempts = 3,
+            TimeoutSeconds = media is Serie
+                ? MediaMetadataRefreshTimeouts.SerieSeconds
+                : MediaMetadataRefreshTimeouts.DefaultSeconds
         }, cancellationToken);
     }
 }

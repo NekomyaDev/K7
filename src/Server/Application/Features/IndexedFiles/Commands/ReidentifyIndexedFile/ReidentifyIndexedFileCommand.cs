@@ -146,7 +146,15 @@ public class ReidentifyIndexedFileCommandHandler(
                 context, sender, createdEpisodeId, logger, cancellationToken);
         }
 
-        await QueueRefreshAsync(newMedia.Id, request.SelectedExternalId, providerName, library, cancellationToken);
+        await QueueRefreshAsync(
+            newMedia.Id,
+            request.SelectedExternalId,
+            providerName,
+            library,
+            cancellationToken,
+            newMedia is Serie
+                ? MediaMetadataRefreshTimeouts.SerieSeconds
+                : MediaMetadataRefreshTimeouts.DefaultSeconds);
     }
 
     private async Task HandleMusicAsync(
@@ -508,7 +516,8 @@ public class ReidentifyIndexedFileCommandHandler(
         string externalId,
         string providerName,
         Library library,
-        CancellationToken cancellationToken) =>
+        CancellationToken cancellationToken,
+        int timeoutSeconds = MediaMetadataRefreshTimeouts.DefaultSeconds) =>
         sender.Send(new CreateBackgroundTaskCommand
         {
             Request = new RefreshMediaMetadatasCommand
@@ -525,7 +534,8 @@ public class ReidentifyIndexedFileCommandHandler(
             MetadataProviderName = MetadataProviderHostMapper.NormalizeProviderName(providerName),
             WorkClass = BackgroundTaskWorkClass.CriticalEnrich,
             TriggeredBy = BackgroundTaskTriggeredBy.User,
-            MaxAttempts = 1
+            MaxAttempts = 1,
+            TimeoutSeconds = timeoutSeconds
         }, cancellationToken);
 
     private async Task QueueAudioAnalysisForIndexedFileAsync(

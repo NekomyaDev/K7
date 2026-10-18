@@ -717,7 +717,10 @@ public class BulkCreateMediasCommandHandler(
                 MetadataProviderName = MetadataProviderHostMapper.NormalizeProviderName(externalId.ProviderName),
                 WorkClass = BackgroundTaskWorkClass.CriticalEnrich,
                 TriggeredBy = BackgroundTaskTriggeredBy.User,
-                MaxAttempts = 3
+                MaxAttempts = 3,
+                TimeoutSeconds = media is Serie
+                    ? MediaMetadataRefreshTimeouts.SerieSeconds
+                    : MediaMetadataRefreshTimeouts.DefaultSeconds
             }, cancellationToken);
         }
     }

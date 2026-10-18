@@ -237,7 +237,8 @@ public class CreateMediaCommandHandler : IRequestHandler<CreateMediaCommand, Gui
                 MetadataProviderName = MetadataProviderHostMapper.NormalizeProviderName(library.MetadataProviderName),
                 WorkClass = BackgroundTaskWorkClass.CriticalEnrich,
                 TriggeredBy = BackgroundTaskTriggeredBy.System,
-                MaxAttempts = 3
+                MaxAttempts = 3,
+                TimeoutSeconds = MediaMetadataRefreshTimeouts.DefaultSeconds
             }, cancellationToken);
         }
 
@@ -595,7 +596,8 @@ public class CreateMediaCommandHandler : IRequestHandler<CreateMediaCommand, Gui
             MetadataProviderName = MetadataProviderHostMapper.NormalizeProviderName(metadataProviderName),
             WorkClass = BackgroundTaskWorkClass.CriticalEnrich,
             TriggeredBy = BackgroundTaskTriggeredBy.System,
-            MaxAttempts = 3
+            MaxAttempts = 3,
+            TimeoutSeconds = MediaMetadataRefreshTimeouts.DefaultSeconds
         }, cancellationToken);
 
     private static MusicAlbum? PickPreferredFormerAlbum(IReadOnlyList<MusicTrack> formerTracks)
@@ -989,7 +991,8 @@ public class CreateMediaCommandHandler : IRequestHandler<CreateMediaCommand, Gui
                 MetadataProviderName = MetadataProviderHostMapper.NormalizeProviderName(matchedProviderName),
                 WorkClass = BackgroundTaskWorkClass.CriticalEnrich,
                 TriggeredBy = BackgroundTaskTriggeredBy.System,
-                MaxAttempts = 3
+                MaxAttempts = 3,
+                TimeoutSeconds = MediaMetadataRefreshTimeouts.SerieSeconds
             }, cancellationToken);
         }
 

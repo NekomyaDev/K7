@@ -149,42 +149,18 @@ public class RefreshMediaMetadatasCommandHandler : IRequestHandler<RefreshMediaM
 
         if (metadata != null)
         {
-            foreach (var personRole in metadata.PersonRoles)
+            if (metadata.PersonRoles.Count > 0)
             {
-                var existingPerson = await _context.Persons
-                    .Include(p => p.Roles)
-                    .FirstOrDefaultAsync(p => p.Name == personRole.Person.Name
-                        && p.Birthday == personRole.Person.Birthday, cancellationToken);
-
-                if (existingPerson is null)
-                {
-                    foreach (var externalId in personRole.Person.ExternalIds.ToList())
-                    {
-                        existingPerson = await _context.Persons
-                            .Include(p => p.Roles)
-                            .FirstOrDefaultAsync(p => p.ExternalIds.Any(x => x.ProviderName == externalId.ProviderName
-                                && x.Value == externalId.Value), cancellationToken);
-
-                        if (existingPerson is not null)
-                        {
-                            break;
-                        }
-                    }
-                }
-
-                // Fallback: match by name only (e.g. Person created by music metadata without birthday)
-                existingPerson ??= await _context.Persons
-                    .Include(p => p.Roles)
-                    .FirstOrDefaultAsync(p => p.Name == personRole.Person.Name, cancellationToken);
-
-                if (existingPerson is not null)
-                {
-                    personRole.Person = existingPerson;
-                }
+                await PersonRolePersonResolveHelper.ResolveAsync(
+                    _context, metadata.PersonRoles, cancellationToken);
+                PersonRolePersonResolveHelper.PreferPersonLevelPortraits(metadata.PersonRoles);
             }
 
             if (!movie.IsFieldLocked(nameof(Movie.PersonRoles)) && metadata.PersonRoles.Count > 0)
+            {
+                PersonRolePortraitReuseHelper.PreserveDownloadedPortraits(movie.PersonRoles, metadata.PersonRoles);
                 RemovePersonRolePortraits(movie.PersonRoles);
+            }
 
             movie.ApplyMetadata(metadata);
             await _metadataTagSyncService.ApplyTagsAsync(
@@ -456,7 +432,10 @@ public class RefreshMediaMetadatasCommandHandler : IRequestHandler<RefreshMediaM
             && !serie.IsFieldLocked(nameof(Serie.PersonRoles))
             && serieMetadata.PersonRoles?.Count > 0)
         {
-            await ResolvePersonReferencesAsync(serieMetadata.PersonRoles, cancellationToken);
+            await PersonRolePersonResolveHelper.ResolveAsync(
+                _context, serieMetadata.PersonRoles, cancellationToken);
+            PersonRolePersonResolveHelper.PreferPersonLevelPortraits(serieMetadata.PersonRoles);
+            PersonRolePortraitReuseHelper.PreserveDownloadedPortraits(serie.PersonRoles, serieMetadata.PersonRoles);
             RemovePersonRolePortraits(serie.PersonRoles);
         }
         else if (request.Incremental && serie.PersonRoles.Count > 0)
@@ -598,8 +577,10 @@ public class RefreshMediaMetadatasCommandHandler : IRequestHandler<RefreshMediaM
             }
         }
 
-        // Fetch and apply episode metadata (catalog-first, then inline enrichment fallback)
+        // Fetch and apply episode metadata (catalog-first, then inline enrichment fallback).
+        // Cast is resolved in a second pass so person lookups are batched across the serie.
         var episodeRemoteIds = new Dictionary<(int Season, int Episode), Guid>();
+        var episodeCastJobs = new List<(SerieEpisode Episode, ExternalEpisodeMetadata Metadata)>();
         foreach (var season in seasonsToRefresh)
         {
             foreach (var episode in season.Episodes)
@@ -671,14 +652,7 @@ public class RefreshMediaMetadatasCommandHandler : IRequestHandler<RefreshMediaM
                 episode.ApplyMetadata(episodeMetadata);
 
                 if (!episode.IsFieldLocked(nameof(SerieEpisode.PersonRoles)) && episodeMetadata.PersonRoles.Count > 0)
-                {
-                    await ResolvePersonReferencesAsync(episodeMetadata.PersonRoles, cancellationToken);
-
-                    RemovePersonRolePortraits(episode.PersonRoles);
-                    episode.PersonRoles.Clear();
-                    foreach (var role in episodeMetadata.PersonRoles)
-                        episode.PersonRoles.Add(role);
-                }
+                    episodeCastJobs.Add((episode, episodeMetadata));
 
                 if (episodeMetadata.RemoteId is not null)
                     episodeRemoteIds[(season.SeasonNumber, episode.EpisodeNumber)] = episodeMetadata.RemoteId.Value;
@@ -706,22 +680,52 @@ public class RefreshMediaMetadatasCommandHandler : IRequestHandler<RefreshMediaM
 
                 if (!string.IsNullOrEmpty(stillImageUrl)
                     && !episode.IsPictureTypeLocked(MetadataPictureType.Still)
-                    && MetadataImageUrlHelper.TryCreateRemoteUri(stillImageUrl, out var stillUri))
+                    && MetadataImageUrlHelper.TryCreateRemoteUri(stillImageUrl, out var stillUri)
+                    && stillUri is not null)
                 {
-                    var stillPicture = new MetadataPicture
+                    // Full refresh used to always recreate stills (even same URI), wiping local
+                    // files and re-flooding the download queue alongside episode cast portraits.
+                    if (!MetadataImageUrlHelper.HasDownloadedPictureWithRemoteUri(
+                            episode.Pictures,
+                            MetadataPictureType.Still,
+                            stillUri))
                     {
-                        OriginalRemoteUri = stillUri,
-                        Type = MetadataPictureType.Still
-                    };
-                    stillPicture.AddDomainEvent(new MetadataPictureCreatedEvent(stillPicture));
+                        var stillPicture = new MetadataPicture
+                        {
+                            OriginalRemoteUri = stillUri,
+                            Type = MetadataPictureType.Still
+                        };
+                        stillPicture.AddDomainEvent(new MetadataPictureCreatedEvent(stillPicture));
 
-                    episode.RemovePicturesOfType(MetadataPictureType.Still);
-                    episode.Pictures.Add(stillPicture);
+                        episode.RemovePicturesOfType(MetadataPictureType.Still);
+                        episode.Pictures.Add(stillPicture);
+                    }
                 }
                 else if (!episode.IsPictureTypeLocked(MetadataPictureType.Still))
                 {
                     await TryQueueEpisodeStillFromSourceFallbackAsync(episode, cancellationToken);
                 }
+            }
+        }
+
+        if (episodeCastJobs.Count > 0)
+        {
+            var allEpisodeRoles = episodeCastJobs
+                .SelectMany(job => job.Metadata.PersonRoles)
+                .ToList();
+            await PersonRolePersonResolveHelper.ResolveAsync(_context, allEpisodeRoles, cancellationToken);
+            // One portrait download per person across the whole serie, not per episode role.
+            PersonRolePersonResolveHelper.PreferPersonLevelPortraits(allEpisodeRoles);
+
+            foreach (var (episode, episodeMetadata) in episodeCastJobs)
+            {
+                PersonRolePortraitReuseHelper.PreserveDownloadedPortraits(
+                    episode.PersonRoles,
+                    episodeMetadata.PersonRoles);
+                RemovePersonRolePortraits(episode.PersonRoles);
+                episode.PersonRoles.Clear();
+                foreach (var role in episodeMetadata.PersonRoles)
+                    episode.PersonRoles.Add(role);
             }
         }
 
@@ -1274,59 +1278,6 @@ public class RefreshMediaMetadatasCommandHandler : IRequestHandler<RefreshMediaM
         }
 
         return catalogMetadata;
-    }
-
-    private async Task ResolvePersonReferencesAsync(IEnumerable<BasePersonRole> roles, CancellationToken cancellationToken)
-    {
-        foreach (var role in roles.ToList())
-        {
-            if (role.Person is null)
-                continue;
-
-            var matchedPersons = new List<Person>();
-            foreach (var externalId in role.Person.ExternalIds.ToList())
-            {
-                var match = await _context.Persons
-                    .Include(p => p.ExternalIds)
-                    .Include(p => p.PortraitPicture)
-                    .FirstOrDefaultAsync(p => p.ExternalIds.Any(e =>
-                        e.ProviderName == externalId.ProviderName && e.Value == externalId.Value),
-                        cancellationToken);
-                if (match is not null && matchedPersons.All(p => p.Id != match.Id))
-                    matchedPersons.Add(match);
-            }
-
-            Person? existingPerson = matchedPersons.Count > 0
-                ? PickCanonicalPerson(matchedPersons)
-                : await _context.Persons
-                    .Include(p => p.ExternalIds)
-                    .Include(p => p.PortraitPicture)
-                    .FirstOrDefaultAsync(p => p.Name == role.Person.Name, cancellationToken);
-
-            if (existingPerson is null)
-                continue;
-
-            await PersonMetadataMergeHelper.EnsurePortraitPictureLoadedAsync(
-                _context, existingPerson, cancellationToken);
-
-            foreach (var duplicate in matchedPersons.Where(p => !ReferenceEquals(p, existingPerson)))
-                PersonMetadataMergeHelper.MergeMissingPersonData(existingPerson, duplicate);
-
-            if (!ReferenceEquals(existingPerson, role.Person))
-                PersonMetadataMergeHelper.MergeMissingPersonData(existingPerson, role.Person);
-
-            role.Person = existingPerson;
-        }
-    }
-
-    private static Person PickCanonicalPerson(IReadOnlyList<Person> persons)
-    {
-        return persons
-            .OrderByDescending(p => p.ExternalIds.Any(e => e.ProviderName == "tmdb"))
-            .ThenByDescending(p => !string.IsNullOrWhiteSpace(p.Biography))
-            .ThenByDescending(p => p.Birthday.HasValue)
-            .ThenBy(p => p.Id)
-            .First();
     }
 
     private void RemovePersonRolePortraits(IEnumerable<BasePersonRole> roles)

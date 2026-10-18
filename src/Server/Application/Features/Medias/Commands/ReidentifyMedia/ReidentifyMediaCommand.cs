@@ -87,7 +87,10 @@ public class ReidentifyMediaCommandHandler(IApplicationDbContext context, ISende
             MetadataProviderName = MetadataProviderHostMapper.NormalizeProviderName(providerName),
             WorkClass = BackgroundTaskWorkClass.CriticalEnrich,
             TriggeredBy = BackgroundTaskTriggeredBy.User,
-            MaxAttempts = 1
+            MaxAttempts = 1,
+            TimeoutSeconds = media is Serie
+                ? MediaMetadataRefreshTimeouts.SerieSeconds
+                : MediaMetadataRefreshTimeouts.DefaultSeconds
         }, cancellationToken);
     }
 }
