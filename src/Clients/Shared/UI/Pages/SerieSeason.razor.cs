@@ -58,8 +58,12 @@ public partial class SerieSeason : IAsyncDisposable
     private readonly Dictionary<Guid, IReadOnlyList<LitePersonRoleDto>> _episodeCastCache = [];
     private IReadOnlyList<PersonRoleDisplayHelper.GroupedDisplay> _focusedEpisodeDisplayableCast = [];
     private Guid? _castLoadEpisodeId;
+    private CancellationTokenSource? _castLoadCts;
     private DebouncedActionRunner? _progressRefreshRunner;
     private bool _refreshSeasonOnPlayerHide;
+    // Wait until episode focus settles. Applying cast on every D-pad step rebuilds the
+    // below carousel and stalls Embla episode navigation.
+    private const int CastUpdateDebounceMs = 400;
 
     private bool HasDisplayableCast => _focusedEpisodeDisplayableCast.Count > 0;
 
@@ -225,10 +229,7 @@ public partial class SerieSeason : IAsyncDisposable
                 ? _episodes.FirstOrDefault(e => e.EpisodeNumber == targetEpNumber)
                 : null) ?? _episodes[0];
             _tvInitialFocusEpisodeId = _focusedEpisode.Id;
-            if (_episodeCastCache.TryGetValue(_focusedEpisode.Id, out var cached))
-                ApplyFocusedEpisodeCast(cached);
-            else
-                await LoadFocusedEpisodeCastAsync(_focusedEpisode);
+            ScheduleFocusedEpisodeCastUpdate(_focusedEpisode);
         }
 
         _loading = false;
@@ -358,15 +359,8 @@ public partial class SerieSeason : IAsyncDisposable
         _focusedEpisode = episode;
         _tvHero?.ApplyFocusedEpisode(episode);
         ApplyTvHeroVisuals(episode);
-
-        if (_episodeCastCache.TryGetValue(episode.Id, out var cached))
-        {
-            ApplyFocusedEpisodeCast(cached);
-            _tvCast?.ApplyCast(_focusedEpisodeDisplayableCast);
-        }
-        else
-            LoadFocusedEpisodeCastAsync(episode).FireAndForget();
-
+        // Cast UI is deferred: never rebuild SerieSeasonTvCast on the episode focus path.
+        ScheduleFocusedEpisodeCastUpdate(episode);
         SyncEpisodeAnchorInUrl(episode.EpisodeNumber);
     }
 
@@ -395,20 +389,77 @@ public partial class SerieSeason : IAsyncDisposable
         }
     }
 
-    private async Task LoadFocusedEpisodeCastAsync(LiteSerieEpisodeDto episode)
+    private void ScheduleFocusedEpisodeCastUpdate(LiteSerieEpisodeDto episode)
+    {
+        _castLoadCts?.Cancel();
+        _castLoadCts?.Dispose();
+        var cts = new CancellationTokenSource();
+        _castLoadCts = cts;
+        ApplyFocusedEpisodeCastWhenSettledAsync(episode, cts.Token).FireAndForget();
+    }
+
+    private async Task ApplyFocusedEpisodeCastWhenSettledAsync(
+        LiteSerieEpisodeDto episode,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(CastUpdateDebounceMs, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        if (_focusedEpisode?.Id != episode.Id)
+            return;
+
+        if (_episodeCastCache.TryGetValue(episode.Id, out var cached))
+        {
+            PublishFocusedEpisodeCast(episode.Id, cached);
+            return;
+        }
+
+        await LoadFocusedEpisodeCastAsync(episode, cancellationToken);
+    }
+
+    private async Task LoadFocusedEpisodeCastAsync(
+        LiteSerieEpisodeDto episode,
+        CancellationToken cancellationToken = default)
     {
         var loadId = episode.Id;
         _castLoadEpisodeId = loadId;
 
-        var media = await k7ServerService.GetMediaAsync(episode.Id);
-        if (_castLoadEpisodeId != loadId || _focusedEpisode?.Id != loadId)
+        MediaDto? media;
+        try
+        {
+            media = await k7ServerService.GetMediaAsync(episode.Id);
+        }
+        catch (OperationCanceledException)
+        {
             return;
+        }
+
+        if (cancellationToken.IsCancellationRequested
+            || _castLoadEpisodeId != loadId
+            || _focusedEpisode?.Id != loadId)
+        {
+            return;
+        }
 
         var roles = media is SerieEpisodeDto episodeDto
             ? episodeDto.PersonRoles ?? []
             : [];
 
         _episodeCastCache[loadId] = roles;
+        PublishFocusedEpisodeCast(loadId, roles);
+    }
+
+    private void PublishFocusedEpisodeCast(Guid episodeId, IReadOnlyList<LitePersonRoleDto> roles)
+    {
+        if (_focusedEpisode?.Id != episodeId)
+            return;
+
         ApplyFocusedEpisodeCast(roles);
         _tvCast?.ApplyCast(_focusedEpisodeDisplayableCast);
     }
@@ -727,6 +778,9 @@ public partial class SerieSeason : IAsyncDisposable
         K7HubClient.ProgressUpdated -= OnProgressUpdated;
         PlayerService.IsVisibleChanged -= OnPlayerVisibilityChanged;
         _progressRefreshRunner?.Dispose();
+        _castLoadCts?.Cancel();
+        _castLoadCts?.Dispose();
+        _castLoadCts = null;
 
         if (!_seasonTvScrollInitialized)
             return;
