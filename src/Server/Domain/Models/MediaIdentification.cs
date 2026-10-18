@@ -7,6 +7,7 @@ public class MediaIdentification
 
     // Music-specific
     public int? TrackNumber { get; set; }
+    public int? DiscNumber { get; set; }
     public string? AlbumName { get; set; }
     public string? ArtistName { get; set; }
     public string? MusicBrainzReleaseId { get; set; }
@@ -14,6 +15,12 @@ public class MediaIdentification
     public string? MusicBrainzArtistId { get; set; }
     public string? MusicBrainzAlbumArtistId { get; set; }
     public string? MusicBrainzRecordingId { get; set; }
+
+    /// <summary>On-disk file count for the album folder (release layout matching).</summary>
+    public int? ExpectedTrackCount { get; set; }
+
+    /// <summary>Distinct disc numbers seen on disk (1 for a single-disc rip, 2+ for deluxe).</summary>
+    public int? ExpectedDiscCount { get; set; }
 
     // Serie-specific
     public string? SeriesTitle { get; set; }

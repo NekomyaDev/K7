@@ -725,8 +725,15 @@ public class FileIndexer : IFileIndexer
             if (!string.IsNullOrEmpty(tags.Title))
                 file.Identification.Title = tags.Title;
 
-            if (tags.TrackNumber.HasValue)
-                file.Identification.TrackNumber = tags.TrackNumber;
+            var (disc, track) = MusicDiscTrackParser.Resolve(
+                tags.DiscNumber,
+                tags.TrackNumber,
+                file.Name,
+                file.ParentDirectory);
+            if (track.HasValue)
+                file.Identification.TrackNumber = track;
+            if (disc.HasValue)
+                file.Identification.DiscNumber = disc;
 
             if (tags.Year.HasValue)
                 file.Identification.ReleaseYear = new DateOnly(tags.Year.Value, 1, 1);

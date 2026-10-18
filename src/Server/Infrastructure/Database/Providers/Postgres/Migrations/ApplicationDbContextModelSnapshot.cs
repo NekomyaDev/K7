@@ -17,7 +17,7 @@ namespace K7.Server.Infrastructure.Database.Providers.Postgres.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "10.0.12")
+                .HasAnnotation("ProductVersion", "10.0.13")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.HasPostgresExtension(modelBuilder, "pg_trgm");
@@ -4260,7 +4260,16 @@ namespace K7.Server.Infrastructure.Database.Providers.Postgres.Migrations
                             b1.Property<string>("ArtistName")
                                 .HasColumnType("text");
 
+                            b1.Property<int?>("DiscNumber")
+                                .HasColumnType("integer");
+
                             b1.Property<int?>("EpisodeNumber")
+                                .HasColumnType("integer");
+
+                            b1.Property<int?>("ExpectedDiscCount")
+                                .HasColumnType("integer");
+
+                            b1.Property<int?>("ExpectedTrackCount")
                                 .HasColumnType("integer");
 
                             b1.Property<string>("MusicBrainzAlbumArtistId")

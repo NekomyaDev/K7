@@ -15,7 +15,7 @@ namespace K7.Server.Infrastructure.Database.Providers.Sqlite.Migrations
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder.HasAnnotation("ProductVersion", "10.0.12");
+            modelBuilder.HasAnnotation("ProductVersion", "10.0.13");
 
             modelBuilder.Entity("DeviceUser", b =>
                 {
@@ -4305,7 +4305,16 @@ namespace K7.Server.Infrastructure.Database.Providers.Sqlite.Migrations
                             b1.Property<string>("ArtistName")
                                 .HasColumnType("TEXT");
 
+                            b1.Property<int?>("DiscNumber")
+                                .HasColumnType("INTEGER");
+
                             b1.Property<int?>("EpisodeNumber")
+                                .HasColumnType("INTEGER");
+
+                            b1.Property<int?>("ExpectedDiscCount")
+                                .HasColumnType("INTEGER");
+
+                            b1.Property<int?>("ExpectedTrackCount")
                                 .HasColumnType("INTEGER");
 
                             b1.Property<string>("MusicBrainzAlbumArtistId")

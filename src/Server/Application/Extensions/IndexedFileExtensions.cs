@@ -56,16 +56,19 @@ public static class IndexedFileExtensions
     {
         string? trackTitle = indexedFile.Name;
         int? trackNumber = null;
+        int? discNumber = null;
 
-        // Extract track number from filename (e.g., "01 - Song Title" -> trackNumber=1, trackTitle="Song Title")
-        if (StringParsingHelper.TryApplyRegexes(trackTitle, Regexes.TrackNumberExtractionRegexes, false, out var trackNumberResult))
+        // DDTT (0101), D-TT (1-06), Disc N, or plain "01 - Title". Parent Disc/CD folders fill disc.
+        var fromName = MusicDiscTrackParser.TryParseFileName(trackTitle);
+        if (fromName is not null)
         {
-            if (int.TryParse(trackNumberResult?.Output, out int parsedTrackNumber))
-            {
-                trackNumber = parsedTrackNumber;
-            }
-            trackTitle = trackNumberResult?.TrimmedInput ?? trackTitle;
+            trackNumber = fromName.TrackNumber;
+            discNumber = fromName.DiscNumber;
+            if (!string.IsNullOrWhiteSpace(fromName.TitleRemainder))
+                trackTitle = fromName.TitleRemainder;
         }
+
+        discNumber ??= MusicDiscTrackParser.TryParseDiscFromDirectory(indexedFile.ParentDirectory);
 
         // Clean the track title from noise
         if (StringParsingHelper.TryApplyRegexes(trackTitle, Regexes.TitleCleaningRegexes, true, out var cleanedResult))
@@ -80,7 +83,16 @@ public static class IndexedFileExtensions
 
         // Album name = parent directory, Artist name = grandparent directory
         // Structure: Artist/Album/01 - Track.flac  OR  Album/01 - Track.flac
+        // Multi-disc: Artist/Album/Disc 2/01 - Track.flac (disc from folder, album one level up)
         var albumName = GetAlbumDirectory(indexedFile, library);
+        if (discNumber is not null
+            && MusicDiscTrackParser.TryParseDiscFromDirectory(indexedFile.ParentDirectory) is not null)
+        {
+            albumName = GetGrandparentDirectory(indexedFile, library) is string discParent
+                ? discParent
+                : albumName;
+            // When ParentDirectory is "Disc 2", album is the folder above and artist is above that.
+        }
 
         // Extract year from album directory name if present
         DateOnly? releaseYear = null;
@@ -94,12 +106,19 @@ public static class IndexedFileExtensions
             albumName = albumYearResult?.TrimmedInput ?? albumName;
         }
 
+        var artistName = albumName is not null
+            ? (MusicDiscTrackParser.TryParseDiscFromDirectory(indexedFile.ParentDirectory) is not null
+                ? GetGreatGrandparentDirectory(indexedFile, library)
+                : GetGrandparentDirectory(indexedFile, library))
+            : null;
+
         indexedFile.Identification = new MediaIdentification(trackTitle)
         {
             ReleaseYear = releaseYear,
             TrackNumber = trackNumber,
+            DiscNumber = discNumber,
             AlbumName = albumName,
-            ArtistName = albumName is not null ? GetGrandparentDirectory(indexedFile, library) : null
+            ArtistName = artistName
         };
 
         return true;
@@ -137,6 +156,25 @@ public static class IndexedFileExtensions
         }
 
         return Path.GetFileName(grandparent);
+    }
+
+    private static string? GetGreatGrandparentDirectory(IndexedFile indexedFile, Library library)
+    {
+        var directory = Path.GetDirectoryName(indexedFile.Path);
+        if (string.IsNullOrEmpty(directory)) return null;
+
+        var grandparent = Path.GetDirectoryName(directory);
+        if (string.IsNullOrEmpty(grandparent)) return null;
+
+        var greatGrandparent = Path.GetDirectoryName(grandparent);
+        if (string.IsNullOrEmpty(greatGrandparent)) return null;
+
+        var normalized = Path.GetFullPath(greatGrandparent);
+        var normalizedRoot = Path.GetFullPath(library.RootPath!);
+        if (string.Equals(normalized, normalizedRoot, StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        return Path.GetFileName(greatGrandparent);
     }
 
     public static bool TryIdentifySerieEpisode(this IndexedFile indexedFile, Library library, IEnumerable<IndexedFile> similarIndexedFiles)
