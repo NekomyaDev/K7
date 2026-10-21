@@ -13,7 +13,7 @@ public static class MusicAlbumTrackMatchHelper
     public static int NormalizeDisc(int? discNumber) => discNumber is null or < 1 ? 1 : discNumber.Value;
 
     /// <summary>
-    /// Prefer disc+track, then title on the same disc. No album-wide title-only match.
+    /// Prefer disc+track, then title on the same disc when unique. No album-wide title-only match.
     /// </summary>
     public static MusicTrack? FindOnAlbum(
         IEnumerable<MusicTrack> tracks,
@@ -37,13 +37,74 @@ public static class MusicAlbumTrackMatchHelper
         if (string.IsNullOrWhiteSpace(title))
             return null;
 
-        return list.FirstOrDefault(t =>
-            NormalizeDisc(t.DiscNumber) == disc
-            && string.Equals(t.Title, title, StringComparison.OrdinalIgnoreCase));
+        var byTitle = list
+            .Where(t =>
+                NormalizeDisc(t.DiscNumber) == disc
+                && string.Equals(t.Title, title, StringComparison.OrdinalIgnoreCase))
+            .Take(2)
+            .ToList();
+
+        return byTitle.Count == 1 ? byTitle[0] : null;
+    }
+
+    /// <summary>
+    /// Match a metadata tracklist entry by disc+track slot only.
+    /// Used when stamping MusicBrainz recording ids - title fallback would collide
+    /// when the same title appears twice (studio vs live, or two same-title slots).
+    /// </summary>
+    public static TMeta? FindMetadataTrackBySlot<TMeta>(
+        IEnumerable<TMeta> metadataTracks,
+        int? discNumber,
+        int? trackNumber,
+        Func<TMeta, int?> getDisc,
+        Func<TMeta, int?> getTrack)
+        where TMeta : class
+    {
+        if (trackNumber is not int number)
+            return null;
+
+        var disc = NormalizeDisc(discNumber);
+        return metadataTracks.FirstOrDefault(mt =>
+            getTrack(mt) == number
+            && NormalizeDisc(getDisc(mt)) == disc);
+    }
+
+    /// <summary>
+    /// Resolve which metadata row should stamp recording/ISRC ids onto a local track.
+    /// Prefer a recording id that already exists on the track when it appears on the release,
+    /// unless that id is shared by multiple local tracks (likely a prior bad stamp) - then
+    /// the disc+track slot wins so studio/live can be corrected.
+    /// </summary>
+    public static TMeta? FindMetadataTrackForRecordingStamp<TMeta>(
+        IEnumerable<TMeta> metadataTracks,
+        int? discNumber,
+        int? trackNumber,
+        string? existingRecordingId,
+        bool existingRecordingIdIsShared,
+        Func<TMeta, int?> getDisc,
+        Func<TMeta, int?> getTrack,
+        Func<TMeta, string?> getRecordingId)
+        where TMeta : class
+    {
+        var list = metadataTracks as IList<TMeta> ?? metadataTracks.ToList();
+        var bySlot = FindMetadataTrackBySlot(list, discNumber, trackNumber, getDisc, getTrack);
+
+        TMeta? byRecording = null;
+        if (!string.IsNullOrWhiteSpace(existingRecordingId))
+        {
+            byRecording = list.FirstOrDefault(mt =>
+                string.Equals(getRecordingId(mt), existingRecordingId, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (byRecording is not null && bySlot is not null && !ReferenceEquals(byRecording, bySlot))
+            return existingRecordingIdIsShared ? bySlot : byRecording;
+
+        return bySlot ?? byRecording;
     }
 
     /// <summary>
     /// Match a metadata tracklist entry to a local track (same priority as FindOnAlbum).
+    /// Title fallback only when exactly one title matches on the disc.
     /// </summary>
     public static TMeta? FindMetadataTrack<TMeta>(
         IEnumerable<TMeta> metadataTracks,
@@ -55,23 +116,27 @@ public static class MusicAlbumTrackMatchHelper
         Func<TMeta, string?> getTitle)
         where TMeta : class
     {
-        var disc = NormalizeDisc(discNumber);
-
-        if (trackNumber is int number)
-        {
-            var bySlot = metadataTracks.FirstOrDefault(mt =>
-                getTrack(mt) == number
-                && NormalizeDisc(getDisc(mt)) == disc);
-            if (bySlot is not null)
-                return bySlot;
-        }
+        var bySlot = FindMetadataTrackBySlot(
+            metadataTracks,
+            discNumber,
+            trackNumber,
+            getDisc,
+            getTrack);
+        if (bySlot is not null)
+            return bySlot;
 
         if (string.IsNullOrWhiteSpace(title))
             return null;
 
-        return metadataTracks.FirstOrDefault(mt =>
-            NormalizeDisc(getDisc(mt)) == disc
-            && string.Equals(getTitle(mt), title, StringComparison.OrdinalIgnoreCase));
+        var disc = NormalizeDisc(discNumber);
+        var byTitle = metadataTracks
+            .Where(mt =>
+                NormalizeDisc(getDisc(mt)) == disc
+                && string.Equals(getTitle(mt), title, StringComparison.OrdinalIgnoreCase))
+            .Take(2)
+            .ToList();
+
+        return byTitle.Count == 1 ? byTitle[0] : null;
     }
 
     /// <summary>

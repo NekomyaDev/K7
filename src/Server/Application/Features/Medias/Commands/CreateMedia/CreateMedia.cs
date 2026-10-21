@@ -548,6 +548,12 @@ public class CreateMediaCommandHandler : IRequestHandler<CreateMediaCommand, Gui
 
             _context.Medias.Add(track);
 
+            if (!string.IsNullOrWhiteSpace(tags?.Isrc))
+                UpsertExternalId(track, "isrc", tags.Isrc);
+
+            if (!string.IsNullOrWhiteSpace(tags?.MusicBrainzRecordingId))
+                UpsertExternalId(track, "musicbrainz", tags.MusicBrainzRecordingId);
+
             var trackArtists = tags?.Artists ?? [];
             var artistName = trackArtists.FirstOrDefault() ?? identification.ArtistName;
             var trackArtistMbid = string.IsNullOrEmpty(artistName)

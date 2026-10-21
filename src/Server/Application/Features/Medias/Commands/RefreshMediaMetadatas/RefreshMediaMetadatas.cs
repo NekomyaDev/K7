@@ -322,14 +322,12 @@ public class RefreshMediaMetadatasCommandHandler : IRequestHandler<RefreshMediaM
                 || existing.IsFieldLocked(nameof(MusicTrack.Title)))
                 continue;
 
-            var meta = MusicAlbumTrackMatchHelper.FindMetadataTrack(
+            var meta = MusicAlbumTrackMatchHelper.FindMetadataTrackBySlot(
                 metadata.Tracks,
                 existing.DiscNumber,
                 existing.TrackNumber,
-                existing.Title,
                 mt => mt.DiscNumber,
-                mt => mt.TrackNumber,
-                mt => mt.Title);
+                mt => mt.TrackNumber);
             if (meta?.Title is null)
                 continue;
 
@@ -815,18 +813,45 @@ public class RefreshMediaMetadatasCommandHandler : IRequestHandler<RefreshMediaM
             .Where(e => e.MediaId.HasValue && trackIds.Contains(e.MediaId.Value))
             .ToListAsync(cancellationToken);
 
+        var recordingIdClaimCounts = album.Tracks
+            .Select(t =>
+                existingExternalIds.FirstOrDefault(e => e.MediaId == t.Id
+                    && string.Equals(e.ProviderName, "musicbrainz", StringComparison.OrdinalIgnoreCase))
+                ?.Value
+                ?? t.ExternalIds.FirstOrDefault(e =>
+                    string.Equals(e.ProviderName, "musicbrainz", StringComparison.OrdinalIgnoreCase))
+                ?.Value)
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .GroupBy(id => id!, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase);
+
         foreach (var track in album.Tracks)
         {
             if (track.IsFieldLocked(nameof(MusicTrack.ExternalIds))) continue;
 
-            var metadataTrack = MusicAlbumTrackMatchHelper.FindMetadataTrack(
+            var existingRecordingId = existingExternalIds
+                .FirstOrDefault(e => e.MediaId == track.Id
+                    && string.Equals(e.ProviderName, "musicbrainz", StringComparison.OrdinalIgnoreCase))
+                ?.Value
+                ?? track.ExternalIds.FirstOrDefault(e =>
+                    string.Equals(e.ProviderName, "musicbrainz", StringComparison.OrdinalIgnoreCase))
+                ?.Value;
+
+            var recordingShared = !string.IsNullOrWhiteSpace(existingRecordingId)
+                && recordingIdClaimCounts.TryGetValue(existingRecordingId, out var claimants)
+                && claimants > 1;
+
+            // Prefer known recording id from tags when unique. Shared/wrong stamps fall back to
+            // disc+track so studio vs live same titles get distinct MusicBrainz recordings.
+            var metadataTrack = MusicAlbumTrackMatchHelper.FindMetadataTrackForRecordingStamp(
                 metadata.Tracks,
                 track.DiscNumber,
                 track.TrackNumber,
-                track.Title,
+                existingRecordingId,
+                recordingShared,
                 mt => mt.DiscNumber,
                 mt => mt.TrackNumber,
-                mt => mt.Title);
+                mt => mt.MusicBrainzRecordingId);
 
             if (metadataTrack is null) continue;
 
@@ -836,24 +861,22 @@ public class RefreshMediaMetadatasCommandHandler : IRequestHandler<RefreshMediaM
                 track.SortTitle = metadataTrack.SortTitle;
             }
 
-            if (!string.IsNullOrEmpty(metadataTrack.MusicBrainzRecordingId)
-                && !existingExternalIds.Any(e => e.MediaId == track.Id && e.ProviderName == "musicbrainz"))
+            if (!string.IsNullOrEmpty(metadataTrack.MusicBrainzRecordingId))
             {
-                track.ExternalIds.Add(new ExternalId
-                {
-                    ProviderName = "musicbrainz",
-                    Value = metadataTrack.MusicBrainzRecordingId
-                });
+                UpsertTrackExternalId(
+                    track,
+                    existingExternalIds,
+                    "musicbrainz",
+                    metadataTrack.MusicBrainzRecordingId);
             }
 
-            if (!string.IsNullOrEmpty(metadataTrack.Isrc)
-                && !existingExternalIds.Any(e => e.MediaId == track.Id && e.ProviderName == "isrc"))
+            if (!string.IsNullOrEmpty(metadataTrack.Isrc))
             {
-                track.ExternalIds.Add(new ExternalId
-                {
-                    ProviderName = "isrc",
-                    Value = metadataTrack.Isrc
-                });
+                UpsertTrackExternalId(
+                    track,
+                    existingExternalIds,
+                    "isrc",
+                    metadataTrack.Isrc);
             }
 
             if (!track.IsFieldLocked(nameof(MusicTrack.Lyrics))
@@ -870,6 +893,40 @@ public class RefreshMediaMetadatasCommandHandler : IRequestHandler<RefreshMediaM
                 track.LyricsLrc = metadataTrack.LyricsLrc;
             }
         }
+    }
+
+    private static void UpsertTrackExternalId(
+        MusicTrack track,
+        List<ExternalId> existingExternalIds,
+        string providerName,
+        string value)
+    {
+        var existing = existingExternalIds.FirstOrDefault(e =>
+            e.MediaId == track.Id
+            && string.Equals(e.ProviderName, providerName, StringComparison.OrdinalIgnoreCase));
+        if (existing is not null)
+        {
+            existing.Value = value;
+            return;
+        }
+
+        var attached = track.ExternalIds.FirstOrDefault(e =>
+            string.Equals(e.ProviderName, providerName, StringComparison.OrdinalIgnoreCase));
+        if (attached is not null)
+        {
+            attached.Value = value;
+            existingExternalIds.Add(attached);
+            return;
+        }
+
+        var created = new ExternalId
+        {
+            ProviderName = providerName,
+            Value = value,
+            MediaId = track.Id
+        };
+        track.ExternalIds.Add(created);
+        existingExternalIds.Add(created);
     }
 
     private async Task EnrichArtistsAsync(MusicAlbum album, ExternalMusicAlbumMetadata metadata, string language, CancellationToken cancellationToken)
@@ -988,14 +1045,12 @@ public class RefreshMediaMetadatasCommandHandler : IRequestHandler<RefreshMediaM
         {
             if (track.ArtistCredits.Count > 0) continue;
 
-            var metadataTrack = MusicAlbumTrackMatchHelper.FindMetadataTrack(
+            var metadataTrack = MusicAlbumTrackMatchHelper.FindMetadataTrackBySlot(
                 metadata.Tracks,
                 track.DiscNumber,
                 track.TrackNumber,
-                track.Title,
                 mt => mt.DiscNumber,
-                mt => mt.TrackNumber,
-                mt => mt.Title);
+                mt => mt.TrackNumber);
 
             if (metadataTrack?.ArtistCredits is not { Count: > 0 }) continue;
 

@@ -99,12 +99,13 @@ public static class SameAlbumDuplicateTrackRepairHelper
 
         foreach (var shell in shells)
         {
-            // Same disc only - deluxe albums repeat titles across discs.
+            // Same disc+track slot (or unique same-disc title when track numbers are missing).
+            // Deluxe albums repeat titles across discs and sometimes on one disc with distinct slots.
             var shellDisc = MusicAlbumTrackMatchHelper.NormalizeDisc(shell.DiscNumber);
             var hits = playable
                 .Where(t =>
                     MusicAlbumTrackMatchHelper.NormalizeDisc(t.DiscNumber) == shellDisc
-                    && ImportedMusicShellReattachHelper.TitlesMatch(shell.Title, t.Title, null, null))
+                    && SameSlotOrUniqueTitle(shell, t))
                 .ToList();
             if (hits.Count != 1)
                 continue;
@@ -208,19 +209,35 @@ public static class SameAlbumDuplicateTrackRepairHelper
     private static bool AreFormatDuplicates(MusicTrack left, MusicTrack right)
     {
         var sameDisc = NormalizeDisc(left.DiscNumber) == NormalizeDisc(right.DiscNumber);
+        if (!sameDisc)
+            return false;
 
-        // Title match only when both sides share a disc (studio vs live same title must not fold).
-        if (sameDisc
-            && ImportedMusicShellReattachHelper.TitlesMatch(left.Title, right.Title, null, null))
-            return HasCompatibleFormats(left, right);
-
+        // Same disc+track slot (flac+mp3 of one song). Same title alone is not enough:
+        // Breakfast in America can repeat titles with different track numbers / recordings.
         if (left.TrackNumber is int leftTrack
             && right.TrackNumber == leftTrack
-            && sameDisc
             && HasCompatibleFormats(left, right))
             return true;
 
-        return sameDisc && SameBasename(left, right) && HasCompatibleFormats(left, right);
+        if (left.TrackNumber is int
+            && right.TrackNumber is int
+            && left.TrackNumber != right.TrackNumber)
+            return false;
+
+        if (ImportedMusicShellReattachHelper.TitlesMatch(left.Title, right.Title, null, null)
+            && HasCompatibleFormats(left, right))
+            return true;
+
+        return SameBasename(left, right) && HasCompatibleFormats(left, right);
+    }
+
+    private static bool SameSlotOrUniqueTitle(MusicTrack shell, MusicTrack playable)
+    {
+        if (shell.TrackNumber is int shellTrack && playable.TrackNumber is int playableTrack)
+            return shellTrack == playableTrack
+                && ImportedMusicShellReattachHelper.TitlesMatch(shell.Title, playable.Title, null, null);
+
+        return ImportedMusicShellReattachHelper.TitlesMatch(shell.Title, playable.Title, null, null);
     }
 
     private static bool HasCompatibleFormats(MusicTrack left, MusicTrack right)

@@ -80,16 +80,30 @@ public class MusicDiscTrackParserTests
     }
 
     [Test]
-    public void Resolve_ShouldPreferCompleteTags_OverDiscFolderAndFilename()
+    public void Resolve_ShouldPreferDiscFolder_WhenTagDiscConflicts()
     {
+        // Tags often leave deluxe live discs as disc 1. Disc N folder wins.
         var (disc, track) = MusicDiscTrackParser.Resolve(
             tagDisc: 1,
             tagTrack: 3,
             fileName: "02 - Goodbye Stranger.flac",
             parentDirectory: "Disc 2");
 
-        disc.Should().Be(1);
-        track.Should().Be(3);
+        disc.Should().Be(2);
+        track.Should().Be(2);
+    }
+
+    [Test]
+    public void Resolve_ShouldKeepTagTrack_WhenDiscFolderConflictsAndFilenameHasNoTrack()
+    {
+        var (disc, track) = MusicDiscTrackParser.Resolve(
+            tagDisc: 1,
+            tagTrack: 5,
+            fileName: "Goodbye Stranger.flac",
+            parentDirectory: "Disc 2");
+
+        disc.Should().Be(2);
+        track.Should().Be(5);
     }
 
     [Test]

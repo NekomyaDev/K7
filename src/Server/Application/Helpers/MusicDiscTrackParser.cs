@@ -4,7 +4,9 @@ namespace K7.Server.Application.Helpers;
 
 /// <summary>
 /// Infers disc and track numbers from audio tags, filenames, and parent folders.
-/// Complete embedded tags (disc + track) win over path layout.
+/// Complete embedded tags (disc + track) win over path layout, except when a parent
+/// Disc/CD/Disk N folder disagrees with the tag disc - then the folder wins (common
+/// when deluxe live discs are still tagged as disc 1).
 /// Path layout (DDTT, D-TT, Disc N folder + track-only name) fills gaps when tags are incomplete.
 /// A packed tag track like 201 with no disc becomes disc 2 / track 1.
 /// </summary>
@@ -13,7 +15,7 @@ public static partial class MusicDiscTrackParser
     public sealed record Parsed(int? DiscNumber, int? TrackNumber, string? TitleRemainder);
 
     /// <summary>
-    /// Resolve disc/track for a file. Complete tags win over path. Path fills gaps.
+    /// Resolve disc/track for a file. Complete tags win over path unless a Disc N folder conflicts.
     /// </summary>
     public static (int? DiscNumber, int? TrackNumber) Resolve(
         int? tagDisc,
@@ -37,7 +39,17 @@ public static partial class MusicDiscTrackParser
             }
         }
 
-        // Complete tags: trust them even if the folder still says Disc 2.
+        // Disc/CD folder that disagrees with tags: folder is authoritative for multi-disc layouts.
+        // Keep the filename track when present (02 - Title in Disc 2), else keep the tag track.
+        if (folderDisc is int layoutDisc && disc is int taggedDisc && layoutDisc != taggedDisc)
+        {
+            if (fromName?.TrackNumber is int layoutTrack)
+                return (layoutDisc, layoutTrack);
+
+            return (layoutDisc, track);
+        }
+
+        // Complete tags: trust them when no Disc N folder conflict.
         if (disc is not null && track is not null)
             return (disc, track);
 

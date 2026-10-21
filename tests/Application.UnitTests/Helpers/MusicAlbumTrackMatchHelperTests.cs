@@ -75,6 +75,107 @@ public class MusicAlbumTrackMatchHelperTests
     }
 
     [Test]
+    public void FindMetadataTrackBySlot_ShouldNotFallBackToSameTitleOnDisc()
+    {
+        var meta = new[]
+        {
+            new Meta(1, 3, "Goodbye Stranger", "rec-studio"),
+            new Meta(1, 8, "Goodbye Stranger", "rec-bonus"),
+        };
+
+        var hit = MusicAlbumTrackMatchHelper.FindMetadataTrackBySlot(
+            meta,
+            discNumber: 1,
+            trackNumber: null,
+            getDisc: m => m.Disc,
+            getTrack: m => m.Track);
+
+        hit.Should().BeNull();
+    }
+
+    [Test]
+    public void FindMetadataTrackForRecordingStamp_ShouldPreferUniqueRecording_OverWrongSlot()
+    {
+        var meta = new[]
+        {
+            new Meta(1, 3, "Goodbye Stranger", "rec-studio"),
+            new Meta(2, 2, "Goodbye Stranger", "rec-live"),
+        };
+
+        var hit = MusicAlbumTrackMatchHelper.FindMetadataTrackForRecordingStamp(
+            meta,
+            discNumber: 1,
+            trackNumber: 2,
+            existingRecordingId: "rec-live",
+            existingRecordingIdIsShared: false,
+            getDisc: m => m.Disc,
+            getTrack: m => m.Track,
+            getRecordingId: m => m.RecordingId);
+
+        hit.Should().NotBeNull();
+        hit!.RecordingId.Should().Be("rec-live");
+    }
+
+    [Test]
+    public void FindMetadataTrackForRecordingStamp_ShouldPreferSlot_WhenRecordingIdIsShared()
+    {
+        var meta = new[]
+        {
+            new Meta(1, 3, "Goodbye Stranger", "rec-studio"),
+            new Meta(2, 2, "Goodbye Stranger", "rec-live"),
+        };
+
+        var hit = MusicAlbumTrackMatchHelper.FindMetadataTrackForRecordingStamp(
+            meta,
+            discNumber: 2,
+            trackNumber: 2,
+            existingRecordingId: "rec-studio",
+            existingRecordingIdIsShared: true,
+            getDisc: m => m.Disc,
+            getTrack: m => m.Track,
+            getRecordingId: m => m.RecordingId);
+
+        hit.Should().NotBeNull();
+        hit!.RecordingId.Should().Be("rec-live");
+    }
+
+    [Test]
+    public void FindMetadataTrack_ShouldReturnNull_WhenSameTitleIsAmbiguousOnDisc()
+    {
+        var meta = new[]
+        {
+            new Meta(1, 3, "Goodbye Stranger", "rec-studio"),
+            new Meta(1, 8, "Goodbye Stranger", "rec-bonus"),
+        };
+
+        var hit = MusicAlbumTrackMatchHelper.FindMetadataTrack(
+            meta,
+            discNumber: 1,
+            trackNumber: null,
+            title: "Goodbye Stranger",
+            getDisc: m => m.Disc,
+            getTrack: m => m.Track,
+            getTitle: m => m.Title);
+
+        hit.Should().BeNull();
+    }
+
+    [Test]
+    public void FindOnAlbum_ShouldReturnNull_WhenSameTitleIsAmbiguousOnDisc()
+    {
+        var first = Track("Goodbye Stranger", disc: 1, track: 3);
+        var second = Track("Goodbye Stranger", disc: 1, track: 8);
+
+        var hit = MusicAlbumTrackMatchHelper.FindOnAlbum(
+            [first, second],
+            title: "Goodbye Stranger",
+            trackNumber: null,
+            discNumber: 1);
+
+        hit.Should().BeNull();
+    }
+
+    [Test]
     public void ShouldSplitFusedFormerTrack_ShouldBeTrue_WhenOtherFileOwnsFormerAndSlotDiffers()
     {
         MusicAlbumTrackMatchHelper.ShouldSplitFusedFormerTrack(
