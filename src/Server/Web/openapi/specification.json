@@ -15979,6 +15979,15 @@
             ],
             "format": "int32"
           },
+          "discNumber": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
           "indexedFileId": {
             "type": [
               "null",
@@ -16577,6 +16586,15 @@
             "format": "uuid"
           },
           "trackNumber": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "discNumber": {
             "pattern": "^-?(?:0|[1-9]\\d*)$",
             "type": [
               "null",
