@@ -150,6 +150,75 @@ public class RefreshMediaMetadatasMusicArtistTests
     }
 
     [Test]
+    public async Task Handle_ShouldKeepOneMember_WhenMusicBrainzRepeatsTheSamePerson()
+    {
+        var artist = new MusicArtist { Title = "Daft Punk" };
+        var person = new Person { Name = "Thomas Bangalter" };
+        artist.PersonRoles.Add(new MusicArtistMember { Person = person, Role = "guitar" });
+        artist.PersonRoles.Add(new MusicArtistMember { Person = person, Role = "vocals", IsActive = true });
+        _context.Medias.Add(artist);
+        _context.Persons.Add(person);
+        await _context.SaveChangesAsync();
+
+        _artistProvider.FetchByProviderIdAsync("dp-mb", "en", Arg.Any<CancellationToken>())
+            .Returns(new ExternalMusicArtistDetails
+            {
+                MusicBrainzArtistId = "dp-mb",
+                Members =
+                [
+                    new ExternalMusicArtistMember { Name = "Thomas Bangalter", MusicBrainzArtistId = "tb", Role = "guitar" },
+                    new ExternalMusicArtistMember { Name = "Thomas Bangalter", MusicBrainzArtistId = "tb", Role = "vocals" }
+                ]
+            });
+
+        await _handler.Handle(new RefreshMediaMetadatasCommand
+        {
+            MediaId = artist.Id,
+            MetadataProviderExternalId = "dp-mb",
+            MetadataProviderName = "musicbrainz",
+            Language = "en",
+            FallbackLanguage = "en"
+        }, CancellationToken.None);
+
+        var roles = await _context.PersonRoles.OfType<MusicArtistMember>().Where(r => r.MediaId == artist.Id).ToListAsync();
+        roles.Should().ContainSingle();
+        roles[0].PersonId.Should().Be(person.Id);
+        roles[0].Role.Should().Be("guitar, vocals");
+    }
+
+    [Test]
+    public async Task Handle_ShouldCreateOneMember_WhenMusicBrainzListsTheSamePersonTwice()
+    {
+        var artist = new MusicArtist { Title = "Daft Punk" };
+        _context.Medias.Add(artist);
+        await _context.SaveChangesAsync();
+
+        _artistProvider.FetchByProviderIdAsync("dp-mb", "en", Arg.Any<CancellationToken>())
+            .Returns(new ExternalMusicArtistDetails
+            {
+                MusicBrainzArtistId = "dp-mb",
+                Members =
+                [
+                    new ExternalMusicArtistMember { Name = "Thomas Bangalter", MusicBrainzArtistId = "tb", Role = "guitar" },
+                    new ExternalMusicArtistMember { Name = "Thomas Bangalter", MusicBrainzArtistId = "tb", Role = "vocals" }
+                ]
+            });
+
+        await _handler.Handle(new RefreshMediaMetadatasCommand
+        {
+            MediaId = artist.Id,
+            MetadataProviderExternalId = "dp-mb",
+            MetadataProviderName = "musicbrainz",
+            Language = "en",
+            FallbackLanguage = "en"
+        }, CancellationToken.None);
+
+        var roles = await _context.PersonRoles.OfType<MusicArtistMember>().Where(r => r.MediaId == artist.Id).ToListAsync();
+        roles.Should().ContainSingle();
+        roles[0].Role.Should().Be("guitar, vocals");
+    }
+
+    [Test]
     public async Task ApplyForPerson_ShouldCopyBirthdayOntoTheSoloArtist()
     {
         var artist = new MusicArtist { Title = "Stromae" };
