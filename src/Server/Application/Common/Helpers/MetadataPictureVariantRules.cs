@@ -16,6 +16,13 @@ public static class MetadataPictureVariantRules
         [(MetadataPictureType.Backdrop, MetadataPictureSize.Medium)] = 1920,
         [(MetadataPictureType.Still, MetadataPictureSize.Small)] = 320,
         [(MetadataPictureType.Still, MetadataPictureSize.Medium)] = 640,
+        // Avatars display at 28-80 CSS px (160 device px on a 2x screen). Serving the uploaded
+        // original left the browser to shrink a photo 10-30x, which WebKitGTK does without
+        // mipmaps (visibly aliased); the clients ask for Small.
+        [(MetadataPictureType.UserAvatar, MetadataPictureSize.Small)] = 160,
+        [(MetadataPictureType.UserAvatar, MetadataPictureSize.Medium)] = 400,
+        [(MetadataPictureType.SharedProfileAvatar, MetadataPictureSize.Small)] = 160,
+        [(MetadataPictureType.SharedProfileAvatar, MetadataPictureSize.Medium)] = 400,
     };
 
     public static bool TryGetTargetWidth(

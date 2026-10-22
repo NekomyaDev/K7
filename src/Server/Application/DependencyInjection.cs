@@ -134,6 +134,7 @@ public static class DependencyInjection
         services.AddScoped<SerieMetadataIdentityService>();
         services.AddScoped<MusicMetadataIdentityService>();
         services.AddScoped<MediaPictureReadyNotifier>();
+        services.AddSingleton<MetadataPictureVariantBackfillThrottle>();
         services.AddScoped<MetadataPictureDeletionService>();
         services.AddScoped<ICoverPictureUploadService, CoverPictureUploadService>();
         services.AddScoped<DiagnosticIssueEntityResolver>();

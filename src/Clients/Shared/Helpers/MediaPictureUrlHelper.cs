@@ -23,6 +23,36 @@ public static class MediaPictureUrlHelper
         url.StartsWith("/api/metadata-pictures/", StringComparison.OrdinalIgnoreCase)
         || url.StartsWith("api/metadata-pictures/", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Adds <c>size=</c> to a metadata picture URL (relative or absolute) that does not request a
+    /// size yet, so the server serves a resized variant instead of the uploaded original. Other
+    /// URLs and URLs that already carry a <c>size</c> are returned unchanged.
+    /// </summary>
+    public static string? WithPictureSize(string? url, string size)
+    {
+        if (string.IsNullOrEmpty(url) || string.IsNullOrEmpty(size))
+            return url;
+
+        if (!url.Contains("/api/metadata-pictures/", StringComparison.OrdinalIgnoreCase)
+            && !url.StartsWith("api/metadata-pictures/", StringComparison.OrdinalIgnoreCase))
+            return url;
+
+        var queryIndex = url.IndexOf('?', StringComparison.Ordinal);
+        if (queryIndex >= 0)
+        {
+            var query = url[(queryIndex + 1)..];
+            foreach (var pair in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (pair.StartsWith("size=", StringComparison.OrdinalIgnoreCase))
+                    return url;
+            }
+
+            return query.Length == 0 ? url + "size=" + size : url + "&size=" + size;
+        }
+
+        return url + "?size=" + size;
+    }
+
     public static string? WithCacheBuster(string? url, DateTimeOffset? version)
     {
         if (string.IsNullOrEmpty(url))

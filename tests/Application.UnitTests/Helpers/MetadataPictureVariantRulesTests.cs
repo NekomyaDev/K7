@@ -27,6 +27,27 @@ public class MetadataPictureVariantRulesTests
     }
 
     [Test]
+    public void TryGetTargetWidth_ShouldReturnAvatarWidths()
+    {
+        MetadataPictureVariantRules.TryGetTargetWidth(MetadataPictureType.UserAvatar, MetadataPictureSize.Small, out var userSmall)
+            .Should().BeTrue();
+        userSmall.Should().Be(160);
+
+        MetadataPictureVariantRules.TryGetTargetWidth(MetadataPictureType.UserAvatar, MetadataPictureSize.Medium, out var userMedium)
+            .Should().BeTrue();
+        userMedium.Should().Be(400);
+
+        MetadataPictureVariantRules.TryGetTargetWidth(MetadataPictureType.SharedProfileAvatar, MetadataPictureSize.Small, out var profileSmall)
+            .Should().BeTrue();
+        profileSmall.Should().Be(160);
+
+        MetadataPictureVariantRules.ShouldGenerateVariant(MetadataPictureType.UserAvatar, MetadataPictureSize.Small, 1024)
+            .Should().BeTrue();
+        MetadataPictureVariantRules.ShouldGenerateVariant(MetadataPictureType.UserAvatar, MetadataPictureSize.Small, 128)
+            .Should().BeFalse();
+    }
+
+    [Test]
     public void TryGetTargetWidth_ShouldReturnFalse_WhenBackdropSmallOrLogoSmall()
     {
         MetadataPictureVariantRules.TryGetTargetWidth(MetadataPictureType.Backdrop, MetadataPictureSize.Small, out _)

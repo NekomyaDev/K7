@@ -46,7 +46,9 @@ public partial class K7Avatar
             if (string.IsNullOrEmpty(Image) || _imageFailed)
                 return null;
 
-            return MediaPictureUrlHelper.ToDisplayUrl(ApiClient, Image);
+            // Avatars are 28-80 CSS px: the Small variant (160 px) instead of the uploaded
+            // original, which browsers without mipmapped downscaling (WebKitGTK) render aliased.
+            return MediaPictureUrlHelper.ToDisplayUrl(ApiClient, MediaPictureUrlHelper.WithPictureSize(Image, "Small"));
         }
     }
 

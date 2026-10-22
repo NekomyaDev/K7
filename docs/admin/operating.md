@@ -413,6 +413,8 @@ Setting a lane to `0` pauses that category, which is useful to stop polish durin
 | `Prepare` | Keyframes and other work that only improves an already playable media. |
 | `Polish` | Thumbnails, intro detection, image variants, content hashing. |
 
+Image variants: posters, covers and portraits get `Small` / `Medium` resized copies, stills `Small` (320 px) / `Medium` (640 px), backdrops `Medium` (1920 px), and user or shared-profile avatars `Small` (160 px) / `Medium` (400 px); the clients request `size=Small` for avatars so the browser never shrinks an uploaded photo itself (WebKitGTK renders that aliased). A picture requested in a size it has no variant for yet is served from the original (not cacheable) and its variants are generated in the background on that first request (ImageProcessing lane, one task per picture per 10 minutes), so avatars uploaded before this rule existed catch up on first display. `POST /api/metadata-pictures/generate-missing-variants` (admin only) still backfills every picture without variants in one go.
+
 Why `Probe` is separate and parallel: playback negotiation needs the container and codecs of a file, so a
 media stays unplayable until its probe has run. Probes used to share a single `ffmpeg` group limited to 1
 and were therefore serialized behind transcoding, which made a first scan of a large library probe files
