@@ -507,9 +507,10 @@ internal class PlayerService(
             return Task.CompletedTask;
         }
 
-#if ANDROID
-        // Demuxed HLS on Exo: all AUDIO renditions are already in the master. Reload cuts
-        // audio; in-player override keeps the previous language until the new one buffers.
+#if ANDROID || LINUX
+        // Demuxed HLS: all AUDIO renditions are already in the master. A master reload cuts
+        // audio on Exo and leaves WebKitGTK Video.js paused after src() (endless spinner);
+        // the in-player override keeps the previous language until the new one buffers.
         if (_baseManifestUrl is not null)
         {
             _baseManifestUrl = BuildManifestUrlWithAudioTrack(_baseManifestUrl, matched.Index);

@@ -223,6 +223,7 @@ public partial class BlazorPage
         // Labs ignores IsVisible / InputTransparent on the WebView: drive the GTK widget.
         SetLinuxWebViewShown(true);
         SetLinuxWebViewInteractive(false);
+        ScheduleLinuxWebVideoProbes();
 #endif
         _ = TryEvaluateWebViewJs(
             "try{if(window.K7&&K7.AmbientTheme&&K7.AmbientTheme.stop)K7.AmbientTheme.stop();"

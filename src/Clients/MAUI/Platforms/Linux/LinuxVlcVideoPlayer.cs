@@ -6,7 +6,6 @@ using K7.Clients.MAUI.Playback;
 using K7.Clients.Shared.Enums;
 using K7.Clients.Shared.Helpers;
 using LibVLCSharp;
-using DeviceType = K7.Server.Domain.Enums.DeviceType;
 using MediaPlayer = LibVLCSharp.MediaPlayer;
 
 namespace K7.Clients.MAUI.Platforms.Linux;
@@ -28,6 +27,16 @@ internal sealed class LinuxVlcVideoPlayer : IDesktopVlcVideoPlayer
     private const int FrameBufferCount = 2;
 
     private static int _resolverInstalled;
+    // Widest BGRA picture requested from libvlc. Hypervisor guests without a GPU convert and
+    // present on the CPU (swscale I0AL->BGRA on the vout thread, MemoryTexture upload through
+    // llvmpipe): at 1080p the vout falls behind, the decoder fifo fills ("fifo full", HEVC
+    // "Could not find ref with POC") and the picture freezes. K7_VLC_VMEM_MAX_WIDTH overrides
+    // (0 = no cap).
+    private static readonly int _vmemMaxWidth = ResolveVmemMaxWidth();
+    // K7_VLC_DEBUG=1: every libvlc log line (all levels) goes to stderr as "vlc-dbg ...". The
+    // bundle ships no logger module, so libvlc's own verbose output has nowhere to go; the
+    // Log event is the only channel.
+    private static readonly bool _debugLogs = Environment.GetEnvironmentVariable("K7_VLC_DEBUG") == "1";
     // libvlc 4 shipped next to the app (libvlc/linux-x64, see tools/linux/bundle-libvlc.sh).
     // null when the client runs against a system VLC 4.
     private static LinuxLibVlcBundle.Layout? _bundle;
@@ -58,6 +67,12 @@ internal sealed class LinuxVlcVideoPlayer : IDesktopVlcVideoPlayer
     private MediaPlayer? _player;
     private Media? _media;
     private VlcAuthProxy? _authProxy;
+    // Direct Play input: .NET HTTP Range requests fed to libvlc through its callbacks access
+    // (see LinuxHttpRangeMediaInput). K7_VLC_ACCESS=http restores the libvlc HTTP module
+    // behind the loopback proxy. Inputs libvlc may still close are retired, not disposed.
+    private static readonly bool _useLibVlcHttpAccess = Environment.GetEnvironmentVariable("K7_VLC_ACCESS") == "http";
+    private LinuxHttpRangeMediaInput? _mediaInput;
+    private readonly List<LinuxHttpRangeMediaInput> _retiredInputs = new();
     private Gtk.Picture? _picture;
     private bool _surfaceLowered;
     private Gdk.Texture? _currentTexture;
@@ -66,6 +81,7 @@ internal sealed class LinuxVlcVideoPlayer : IDesktopVlcVideoPlayer
     private int _pendingFrameHeight;
     private int _pendingFrameStride;
     private int _presentScheduled;
+    private long _presentScheduledTick;
     private string? _lastNativeError;
     private readonly Dictionary<string, int> _nativeLogCounts = new(StringComparer.Ordinal);
     private string? _currentUrl;
@@ -108,7 +124,8 @@ internal sealed class LinuxVlcVideoPlayer : IDesktopVlcVideoPlayer
             VerticalOptions = LayoutOptions.Fill,
             InputTransparent = true,
             BackgroundColor = Colors.Black,
-            ZIndex = 3,
+            // Lowest ZIndex on RootGrid: the hidden BlazorWebView sits at 2, the chrome at 4+.
+            ZIndex = 1,
             IsVisible = false
         };
         _videoView.PictureChanged += OnPictureChanged;
@@ -481,6 +498,29 @@ internal sealed class LinuxVlcVideoPlayer : IDesktopVlcVideoPlayer
     public void Dispose()
     {
         Stop();
+        var teardownForInputs = _teardownTask ?? Task.CompletedTask;
+        var inputs = new List<LinuxHttpRangeMediaInput>(_retiredInputs);
+        if (_mediaInput is not null)
+            inputs.Add(_mediaInput);
+        _retiredInputs.Clear();
+        _mediaInput = null;
+        // Dispose the callbacks inputs once libvlc finished stopping (it closes them from the
+        // input thread during Stop).
+        _ = teardownForInputs.ContinueWith(
+            _ =>
+            {
+                foreach (var input in inputs)
+                {
+                    try
+                    {
+                        input.Dispose();
+                    }
+                    catch
+                    {
+                    }
+                }
+            },
+            TaskScheduler.Default);
         _videoView.PictureChanged -= OnPictureChanged;
         // The pending ClearPresentedFrame / PresentPendingFrame idles must not reach a widget
         // that the layout is about to unparent and free.
@@ -521,8 +561,10 @@ internal sealed class LinuxVlcVideoPlayer : IDesktopVlcVideoPlayer
     /// <summary>
     /// GTK4 draws the last sibling on top and the labs layout does not reorder children by
     /// ZIndex at insertion: the surface is added after the native overlay and would cover it
-    /// once frames arrive. The handler hands the picture over before the panel parents it, so
-    /// this runs again from the first presented frame.
+    /// once frames arrive. Re-apply the MAUI ZIndex order of the host (the surface has the
+    /// lowest one) instead of moving the picture by hand, which the layout driver's sort would
+    /// undo on the next tick. The handler hands the picture over before the panel parents it,
+    /// so this runs again from the first presented frame.
     /// </summary>
     private void EnsureSurfaceBelowOverlay()
     {
@@ -531,10 +573,10 @@ internal sealed class LinuxVlcVideoPlayer : IDesktopVlcVideoPlayer
 
         try
         {
-            if (_picture.GetParent() is not Gtk.Widget parent)
+            if (_picture.GetParent() is null)
                 return;
 
-            _picture.InsertAfter(parent, null);
+            LinuxWidgetStack.SortByZIndex(_host);
             _surfaceLowered = true;
             VlcPlayerLog.Info("vlc surface lowered below overlay");
         }
@@ -580,7 +622,10 @@ internal sealed class LinuxVlcVideoPlayer : IDesktopVlcVideoPlayer
 
         VlcPlayerLog.Info("vlc libvlc version " + version);
 
-        var style = VlcSubtitleStyle.ToVlcInstanceOptions(DeviceType.Desktop);
+        // No VlcSubtitleStyle (--freetype-*) options here: the linux-x64 bundle ships no freetype
+        // text renderer (text cues are the GTK sidecar label), and libvlc_new aborts on options
+        // of modules it cannot find. The old retry then fell back to "--no-osd" alone and lost
+        // --aout=pulse / --no-plugins-cache.
         var args = new List<string>
         {
             "--no-osd",
@@ -599,14 +644,14 @@ internal sealed class LinuxVlcVideoPlayer : IDesktopVlcVideoPlayer
         // directory instead of warning about a cache that cannot be written.
         if (_bundle is not null)
             args.Add("--no-plugins-cache");
-        args.AddRange(style);
         // Debug logs go straight to stderr on Linux (libvlc console logger). The Log event
         // below still receives every message, so keep the console quiet.
+        var debugLogs = _debugLogs;
         if (_sharedLibVlc is null)
         {
             try
             {
-                _sharedLibVlc = new LibVLC(enableDebugLogs: false, args.ToArray());
+                _sharedLibVlc = new LibVLC(enableDebugLogs: debugLogs, args.ToArray());
             }
             catch (VLCException)
             {
@@ -615,14 +660,19 @@ internal sealed class LinuxVlcVideoPlayer : IDesktopVlcVideoPlayer
                 VlcPlayerLog.Warn("vlc ctor options rejected, retrying without --codec");
                 try
                 {
-                    _sharedLibVlc = new LibVLC(enableDebugLogs: false, reduced);
+                    _sharedLibVlc = new LibVLC(enableDebugLogs: debugLogs, reduced);
                     args = reduced.ToList();
                 }
                 catch (VLCException)
                 {
                     VlcPlayerLog.Warn("vlc ctor options rejected, retrying minimal");
-                    _sharedLibVlc = new LibVLC(enableDebugLogs: false, "--no-osd");
-                    args = ["--no-osd"];
+                    var minimal = new List<string> { "--no-osd" };
+                    if (HasPulseAudioSession())
+                        minimal.Add("--aout=pulse");
+                    if (_bundle is not null)
+                        minimal.Add("--no-plugins-cache");
+                    _sharedLibVlc = new LibVLC(enableDebugLogs: debugLogs, minimal.ToArray());
+                    args = minimal;
                 }
             }
 
@@ -661,13 +711,19 @@ internal sealed class LinuxVlcVideoPlayer : IDesktopVlcVideoPlayer
             return;
 
         PrepareBundle();
-        try
+        // Both assemblies P/Invoke "libvlc": LibVLCSharp, and this one for the version probe
+        // below. A resolver is per assembly, so without the second registration the probe
+        // only finds a system libvlc (none inside Flatpak) and Direct Play never starts.
+        foreach (var assembly in new[] { typeof(LibVLC).Assembly, typeof(LinuxVlcVideoPlayer).Assembly })
         {
-            NativeLibrary.SetDllImportResolver(typeof(LibVLC).Assembly, ResolveNativeLibrary);
-        }
-        catch (InvalidOperationException)
-        {
-            // Another component already registered a resolver for this assembly.
+            try
+            {
+                NativeLibrary.SetDllImportResolver(assembly, ResolveNativeLibrary);
+            }
+            catch (InvalidOperationException)
+            {
+                // Another component already registered a resolver for this assembly.
+            }
         }
     }
 
@@ -804,6 +860,21 @@ internal sealed class LinuxVlcVideoPlayer : IDesktopVlcVideoPlayer
 
         var frameWidth = (int)Math.Max(1, width);
         var frameHeight = (int)Math.Max(1, height);
+        if (_vmemMaxWidth > 0 && frameWidth > _vmemMaxWidth)
+        {
+            // libvlc inserts its swscale filter to produce this size; even dimensions keep
+            // the converter on its fast paths.
+            var scale = (double)_vmemMaxWidth / frameWidth;
+            frameWidth = _vmemMaxWidth & ~1;
+            frameHeight = Math.Max(2, (int)Math.Round(frameHeight * scale)) & ~1;
+            width = (uint)frameWidth;
+            height = (uint)frameHeight;
+            VlcPlayerLog.Info(
+                "vlc vmem downscale maxWidth=" + _vmemMaxWidth.ToString(CultureInfo.InvariantCulture)
+                + " -> " + frameWidth.ToString(CultureInfo.InvariantCulture)
+                + "x" + frameHeight.ToString(CultureInfo.InvariantCulture));
+        }
+
         var stride = frameWidth * BytesPerPixel;
         pitches = (uint)stride;
         lines = (uint)frameHeight;
@@ -836,6 +907,18 @@ internal sealed class LinuxVlcVideoPlayer : IDesktopVlcVideoPlayer
         return FrameBufferCount;
     }
 
+    private static int ResolveVmemMaxWidth()
+    {
+        var raw = Environment.GetEnvironmentVariable("K7_VLC_VMEM_MAX_WIDTH");
+        if (!string.IsNullOrWhiteSpace(raw)
+            && int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+        {
+            return parsed <= 0 ? 0 : Math.Max(320, parsed);
+        }
+
+        return LinuxHostInfo.IsVirtualMachine ? 1280 : 0;
+    }
+
     private static IntPtr OnVideoLock(IntPtr opaque, IntPtr planes)
     {
         lock (_frameGate)
@@ -856,6 +939,18 @@ internal sealed class LinuxVlcVideoPlayer : IDesktopVlcVideoPlayer
     {
         if (picture == IntPtr.Zero || !_active)
             return;
+
+        // GTK has not presented the previous frame yet: drop this one before the alpha pass
+        // and the copy. On GPU-less hosts that work on the vlc-vout thread stalled the decoder
+        // fifo ("fifo full", then HEVC "Could not find ref with POC" after the reset and a
+        // frozen picture). A present that never ran (reopen race) releases the flag after 500ms.
+        if (Volatile.Read(ref _presentScheduled) != 0)
+        {
+            if (Environment.TickCount64 - Volatile.Read(ref _presentScheduledTick) > 500)
+                Interlocked.Exchange(ref _presentScheduled, 0);
+            else
+                return;
+        }
 
         GLib.Bytes frame;
         int width;
@@ -886,6 +981,7 @@ internal sealed class LinuxVlcVideoPlayer : IDesktopVlcVideoPlayer
 
         replaced?.Dispose();
 
+        Volatile.Write(ref _presentScheduledTick, Environment.TickCount64);
         if (Interlocked.Exchange(ref _presentScheduled, 1) == 0)
             GLib.Functions.IdleAdd(0, PresentPendingFrame);
     }
@@ -1069,7 +1165,7 @@ internal sealed class LinuxVlcVideoPlayer : IDesktopVlcVideoPlayer
             media = new Media(localPath, FromType.FromPath);
             via = "file";
         }
-        else
+        else if (_useLibVlcHttpAccess)
         {
             var playUrl = EnsurePlayProxy(url);
             via = _authProxy is { LocalUrl: not null } ? "http-proxy" : "http-query";
@@ -1078,6 +1174,14 @@ internal sealed class LinuxVlcVideoPlayer : IDesktopVlcVideoPlayer
             media.AddOption(":http-reconnect");
             if (_authProxy is null)
                 AddHttpExtraHeader(media, _pendingAuthorization);
+        }
+        else
+        {
+            RetireMediaInput();
+            _mediaInput = new LinuxHttpRangeMediaInput(url, () => _pendingAuthorization);
+            media = new Media(_mediaInput);
+            media.AddOption(":network-caching=400");
+            via = "http-range";
         }
 
         AddMediaPlaybackOptions(media);
@@ -1261,6 +1365,36 @@ internal sealed class LinuxVlcVideoPlayer : IDesktopVlcVideoPlayer
         if (published > 1)
             return published;
         return Math.Max(raw, 0);
+    }
+
+    /// <summary>
+    /// Parks the current callbacks input and disposes the retired ones libvlc has closed.
+    /// libvlc closes the input from its own thread after Stop, so the instance (and its
+    /// GCHandle) must outlive the media that referenced it.
+    /// </summary>
+    private void RetireMediaInput()
+    {
+        if (_mediaInput is not null)
+        {
+            _retiredInputs.Add(_mediaInput);
+            _mediaInput = null;
+        }
+
+        for (var i = _retiredInputs.Count - 1; i >= 0; i--)
+        {
+            if (!_retiredInputs[i].IsClosed)
+                continue;
+
+            try
+            {
+                _retiredInputs[i].Dispose();
+            }
+            catch
+            {
+            }
+
+            _retiredInputs.RemoveAt(i);
+        }
     }
 
     private string EnsurePlayProxy(string url)
@@ -1737,6 +1871,9 @@ internal sealed class LinuxVlcVideoPlayer : IDesktopVlcVideoPlayer
     {
         var module = e.Module ?? "-";
         var message = e.Message ?? "";
+        if (_debugLogs)
+            Console.Error.WriteLine("vlc-dbg " + e.Level + " " + module + ": " + message);
+
         if (IsNoisyVlcLog(message))
             return;
 

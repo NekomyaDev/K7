@@ -14,6 +14,7 @@ namespace K7.Clients.MAUI.Playback;
 public sealed class WindowsStreamFetchJsBridge(IK7ServerService serverService, IDeviceStorageService? deviceStorage = null) : IWindowsStreamFetchJsBridge, IDisposable
 {
     private DotNetObjectReference<WindowsStreamFetchJsBridge>? _ref;
+    private int _tracedFetches;
 #if LINUX
     private const int MaxLocalProxies = 4;
     private readonly List<KeyValuePair<string, VlcAuthProxy>> _localProxies = new();
@@ -31,37 +32,66 @@ public sealed class WindowsStreamFetchJsBridge(IK7ServerService serverService, I
     [JSInvokable]
     public async Task<StreamFetchResponse?> FetchStreamAsync(string url, string? rangeHeader)
     {
-        var httpClient = serverService.HttpClient;
-        if (httpClient.BaseAddress is not Uri serverBaseUri
-            || !Uri.TryCreate(url, UriKind.Absolute, out var requestUri))
+        // The first fetches of a session and every failure are traced: VHS runs its HLS
+        // requests through this bridge, so a problem here looks like "no request ever reaches
+        // the server" from the page and from the server alike.
+        var trace = Interlocked.Increment(ref _tracedFetches) <= 12;
+        try
         {
-            return null;
+            var httpClient = serverService.HttpClient;
+            if (httpClient.BaseAddress is not Uri serverBaseUri
+                || !Uri.TryCreate(url, UriKind.Absolute, out var requestUri))
+            {
+                VlcPlayerLog.Warn("stream fetch rejected (no server base or invalid url) " + VlcPlayerLog.SummarizeUrl(url));
+                return null;
+            }
+
+            // Video.js on Windows must not remux EAC3 into fMP4 - force AAC when the playlist
+            // omitted TranscodingAudioCodec (older server decisions / dropped query params).
+            var fetchUrl = HlsStreamUrlHelper.EnsureWindowsHlsAudioTranscodeQuery(requestUri.AbsoluteUri);
+            if (!Uri.TryCreate(fetchUrl, UriKind.Absolute, out requestUri))
+            {
+                VlcPlayerLog.Warn("stream fetch rejected (rewritten url) " + VlcPlayerLog.SummarizeUrl(fetchUrl));
+                return null;
+            }
+
+            if (!requestUri.AbsoluteUri.StartsWith(serverBaseUri.AbsoluteUri, StringComparison.OrdinalIgnoreCase)
+                || !HlsStreamUrlHelper.IsK7StreamResource(requestUri.AbsoluteUri))
+            {
+                VlcPlayerLog.Warn(
+                    "stream fetch rejected (outside server or not a stream) " + VlcPlayerLog.SummarizeUrl(requestUri.AbsoluteUri)
+                    + " base=" + serverBaseUri.AbsoluteUri);
+                return null;
+            }
+
+            using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
+            if (!string.IsNullOrEmpty(rangeHeader))
+                request.Headers.TryAddWithoutValidation("Range", rangeHeader);
+
+            using var response = await httpClient.SendAsync(request);
+            var bodyBytes = await response.Content.ReadAsByteArrayAsync();
+            bodyBytes = PrepareBodyBytes(bodyBytes, requestUri);
+
+            var contentType = response.Content.Headers.ContentType?.MediaType
+                ?? GetFallbackContentType(requestUri);
+
+            if (trace || (int)response.StatusCode >= 400)
+            {
+                VlcPlayerLog.Info(
+                    "stream fetch " + VlcPlayerLog.SummarizeUrl(requestUri.AbsoluteUri)
+                    + (string.IsNullOrEmpty(rangeHeader) ? "" : " range=" + rangeHeader)
+                    + " -> " + ((int)response.StatusCode).ToString(System.Globalization.CultureInfo.InvariantCulture)
+                    + " " + contentType
+                    + " " + bodyBytes.Length.ToString(System.Globalization.CultureInfo.InvariantCulture) + "B");
+            }
+
+            return new StreamFetchResponse((int)response.StatusCode, contentType, bodyBytes);
         }
-
-        // Video.js on Windows must not remux EAC3 into fMP4 - force AAC when the playlist
-        // omitted TranscodingAudioCodec (older server decisions / dropped query params).
-        var fetchUrl = HlsStreamUrlHelper.EnsureWindowsHlsAudioTranscodeQuery(requestUri.AbsoluteUri);
-        if (!Uri.TryCreate(fetchUrl, UriKind.Absolute, out requestUri))
-            return null;
-
-        if (!requestUri.AbsoluteUri.StartsWith(serverBaseUri.AbsoluteUri, StringComparison.OrdinalIgnoreCase)
-            || !HlsStreamUrlHelper.IsK7StreamResource(requestUri.AbsoluteUri))
+        catch (Exception ex)
         {
-            return null;
+            VlcPlayerLog.Warn("stream fetch " + VlcPlayerLog.SummarizeUrl(url) + " " + ex.GetType().Name + " " + ex.Message);
+            throw;
         }
-
-        using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
-        if (!string.IsNullOrEmpty(rangeHeader))
-            request.Headers.TryAddWithoutValidation("Range", rangeHeader);
-
-        using var response = await httpClient.SendAsync(request);
-        var bodyBytes = await response.Content.ReadAsByteArrayAsync();
-        bodyBytes = PrepareBodyBytes(bodyBytes, requestUri);
-
-        var contentType = response.Content.Headers.ContentType?.MediaType
-            ?? GetFallbackContentType(requestUri);
-
-        return new StreamFetchResponse((int)response.StatusCode, contentType, bodyBytes);
     }
 
     private static byte[] PrepareBodyBytes(byte[] bodyBytes, Uri requestUri)

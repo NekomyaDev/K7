@@ -67,6 +67,9 @@ internal static class LinuxLabelTextShadow
         try
         {
             provider.LoadFromString(css.ToString());
+            // The frame MAUI arranged may predate this CSS (first layout with the theme font):
+            // ask for a new measure so the text fits the font it is actually drawn with.
+            label.InvalidateMeasure();
         }
         catch (Exception ex)
         {

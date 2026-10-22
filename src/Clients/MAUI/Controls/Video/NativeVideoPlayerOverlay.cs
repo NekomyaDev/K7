@@ -493,6 +493,12 @@ public sealed partial class NativeVideoPlayerOverlay : Grid
             UpdateTransport();
             ResetHideTimer();
             SyncTvSurfaceComposition();
+#if WINDOWS || LINUX
+            // The sidecar VTT often finishes while the veil still covers the cue layer: repaint
+            // the current cue now instead of waiting for the next cue change.
+            AttachSidecarLayer();
+            UpdateSidecarCue(_player.CurrentTime);
+#endif
         });
     }
 

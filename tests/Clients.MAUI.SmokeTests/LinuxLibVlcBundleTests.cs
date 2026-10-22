@@ -80,6 +80,22 @@ public class LinuxLibVlcBundleTests
             Path.Combine(bundle, "libvlccore.so.9"));
     }
 
+    [Test]
+    public void EnumeratePreloadLibraries_ShouldSkipLibVa()
+    {
+        var bundle = CreateBundle(Path.Combine(_root, "libvlc", "linux-x64"));
+        var lib = Path.Combine(bundle, "lib");
+        Directory.CreateDirectory(lib);
+        File.WriteAllText(Path.Combine(lib, "libva.so.2"), string.Empty);
+        File.WriteAllText(Path.Combine(lib, "libva-drm.so.2"), string.Empty);
+        File.WriteAllText(Path.Combine(lib, "libavutil.so.58"), string.Empty);
+
+        var preload = LinuxLibVlcBundle.EnumeratePreloadLibraries(LinuxLibVlcBundle.Locate(_root, null)!);
+
+        preload.Should().NotContain(path => Path.GetFileName(path).StartsWith("libva", StringComparison.Ordinal));
+        preload.Should().Contain(Path.Combine(lib, "libavutil.so.58"));
+    }
+
     private static string CreateBundle(string directory)
     {
         Directory.CreateDirectory(directory);

@@ -2,7 +2,9 @@ let players = {};
 
 // Match AndroidExoHlsTuning: VHS disables subtitle tracks on the first segment error.
 // Server returns 503 while ffmpeg extracts the sidecar VTT; retry before VHS sees it.
-const K7_VTT_503_MAX_ATTEMPTS = 12;
+// 500 ms, 1 s, 2 s, 4 s, then 8 s per attempt: 80 attempts cover about ten minutes of 503,
+// the same bound as SubtitleVttRetryPolicy on the native clients (a large remux extraction).
+const K7_VTT_503_MAX_ATTEMPTS = 80;
 const K7_VTT_503_MAX_BACKOFF_MS = 15_000;
 
 function isVttSubtitleUrl(uri) {
@@ -307,8 +309,33 @@ function ensurePlaybackStarted(player, id) {
     }
 }
 
+// WebKitGTK's user agent ends in "Version/x Safari/605.1.15", so Video.js reports
+// browser.IS_ANY_SAFARI (and, with touch events present, IS_IPAD / IS_IOS). VHS then attaches
+// MSE the Safari way: two <source> children (the MediaSource blob URL, then the manifest as
+// Safari's native-HLS fallback) instead of video.src = blob. Inside the Flatpak runtime that
+// left the element on the manifest in NETWORK_NO_SOURCE with no MediaError and no request
+// (endless spinner). Hand VHS a browser table without the Safari / iOS flags so it takes the
+// video.src path like Chromium, Firefox and WebView2 (videojs.browser is a frozen module
+// namespace: the object is replaced, its keys cannot be).
+function applyLinuxGtkVideoJsQuirks() {
+    if (!window.K7_LINUX_GTK || !window.videojs || !videojs.browser || videojs.browser.__k7LinuxGtk)
+        return;
+
+    var patched = {};
+    Object.keys(videojs.browser).forEach(function (key) {
+        patched[key] = videojs.browser[key];
+    });
+    patched.IS_SAFARI = false;
+    patched.IS_ANY_SAFARI = false;
+    patched.IS_IPAD = false;
+    patched.IS_IOS = false;
+    patched.__k7LinuxGtk = true;
+    videojs.browser = patched;
+}
+
 window.initVideoJs = function (id, videoPlayer, videoContainer, options, dotNetRef) {
     ensurePlatformStreamBridge();
+    applyLinuxGtkVideoJsQuirks();
     // The Blazor element reference can be stale after a native-player session blanked the
     // surfaces (MAUI hosts): fall back to the live <video> in the container.
     if (!videoPlayer || !videoPlayer.isConnected) {
@@ -344,6 +371,10 @@ window.initVideoJs = function (id, videoPlayer, videoContainer, options, dotNetR
         html5: {
             ...(options?.html5 ?? {}),
             nativeTextTracks: false,
+            // WebKitGTK exposes native audioTracks / videoTracks on <video>. With them, VHS
+            // refuses overrideNative ("Overriding native VHS requires emulated tracks"), which
+            // the Video.js docs resolve with emulated tracks.
+            ...(window.K7_LINUX_GTK ? { nativeAudioTracks: false, nativeVideoTracks: false } : {}),
             vhs: {
                 ...(options?.html5?.vhs ?? {}),
                 overrideNative: true

@@ -34,23 +34,28 @@ done
 # K7 needs explicitly (file / HTTP input, Pulse output, vmem video output, ...).
 KEEP_CATEGORIES="audio_filter audio_mixer codec demux packetizer video_chroma x86"
 declare -A KEEP_ONLY=(
-  [access]="libfilesystem_plugin.so libhttp_plugin.so libhttps_plugin.so"
+  # imem: libvlc media callbacks (LinuxHttpRangeMediaInput feeds Direct Play from .NET).
+  [access]="libfilesystem_plugin.so libhttp_plugin.so libhttps_plugin.so libimem_plugin.so"
   [audio_output]="libpulse_plugin.so libadummy_plugin.so"
   [misc]="libxml_plugin.so libgnutls_plugin.so libdbus_screensaver_plugin.so libxdg_screensaver_plugin.so"
   [stream_filter]="libcache_read_plugin.so libprefetch_plugin.so libskiptags_plugin.so"
   [text_renderer]="libtdummy_plugin.so"
   [video_filter]="libdeinterlace_plugin.so libscale_plugin.so libblend_plugin.so libcanvas_plugin.so libcroppadd_plugin.so libtransform_plugin.so libfps_plugin.so libformatcrop_plugin.so"
-  [video_output]="libvmem_plugin.so libvdummy_plugin.so"
+  # libwdummy: libvlc_video_set_callbacks() sets window=dummy (lib/media_player.c), which is
+  # the "vout window" shortcut of wdummy. Without it the vout never opens and vmem stays black.
+  [video_output]="libvmem_plugin.so libvdummy_plugin.so libwdummy_plugin.so"
 )
 # Dropped inside the kept categories: encoders, hardware decoders without a vmem path, the
 # S/PDIF pass-through decoder (the Pulse output rejects it after a 10s timeout), subtitle
 # renderers (K7 draws text subtitles itself), inputs K7 never plays through libvlc (HLS, TS).
 DROP_PLUGINS="libvaapi_plugin.so libx264_plugin.so libx26410b_plugin.so libx265_plugin.so libglinterop_nvdec_plugin.so libspdif_plugin.so libtospdif_plugin.so libzvbi_plugin.so libaribsub_plugin.so libaribcaption_plugin.so libkate_plugin.so libsvgdec_plugin.so liblibass_plugin.so libfluidsynth_plugin.so libfaad_plugin.so libmad_plugin.so libmpg123_plugin.so libtwolame_plugin.so libadaptive_plugin.so libmod_plugin.so libts_plugin.so libytdl_plugin.so libdemux_chromecast_plugin.so libspatialaudio_plugin.so"
 
-# Shared libraries every GTK4 / WebKitGTK desktop already provides (the .deb depends on the
-# non-obvious ones): never copied, resolved from the host at run time. Everything else that
+# Shared libraries every GTK4 / WebKitGTK desktop and the GNOME Flatpak runtime already
+# provide: never copied, resolved from the host at run time. Everything else that
 # the kept plugins pull in (ffmpeg, dav1d, matroska, libva, ...) is copied to lib/.
-HOST_LIBS='^(ld-linux-x86-64|libc|libm|libdl|libpthread|librt|libresolv|libutil|libnsl|libanl|libstdc\+\+|libgcc_s|libatomic|libz|libpulse|libpulsecommon-[0-9.]+|libdbus-1|libsystemd|libgnutls|libnettle|libhogweed|libgmp|libtasn1|libidn2|libunistring|libp11-kit|libffi|libglib-2\.0|libgobject-2\.0|libgio-2\.0|libgmodule-2\.0|libgthread-2\.0|libpcre2-8|libselinux|libmount|libblkid|libuuid|libcap|libgcrypt|libgpg-error|liblzma|libzstd|liblz4|libbz2|libX11|libXext|libXau|libXdmcp|libXfixes|libXrender|libxcb[-a-z0-9]*|libdrm|libgbm|libEGL|libGL|libGLX|libGLdispatch|libOpenGL|libwayland-[a-z]+|libxkbcommon|libfontconfig|libfreetype|libharfbuzz|libfribidi|libpng16|libexpat|libbrotli[a-z]*|libgraphite2|libcairo|libcairo-gobject|libpango-1\.0|libpangocairo-1\.0|libpangoft2-1\.0|libgdk_pixbuf-2\.0|librsvg-2|libjpeg|libtiff|libwebp[a-z]*|libsharpyuv|libudev|libusb-1\.0|libcom_err|libkrb5[a-z]*|libk5crypto|libgssapi_krb5|libkeyutils|libcrypto|libssl|libsasl2|libldap[-_0-9a-z.]*|liblber[-0-9.]*|libmd|libbsd|libcrypt|libtinfo|libncursesw|libpixman-1|libthai|libdatrie|libdeflate|libjbig|libLerc|libdw|libelf)\.so'
+# libbz2 / libbsd / libmd are bundled: the GNOME Flatpak runtime ships libbz2.so.1 -> 1.0.8
+# (no libbz2.so.1.0 soname Ubuntu ffmpeg needs) and no libbsd at all.
+HOST_LIBS='^(ld-linux-x86-64|libc|libm|libdl|libpthread|librt|libresolv|libutil|libnsl|libanl|libstdc\+\+|libgcc_s|libatomic|libz|libpulse|libpulsecommon-[0-9.]+|libdbus-1|libsystemd|libgnutls|libnettle|libhogweed|libgmp|libtasn1|libidn2|libunistring|libp11-kit|libffi|libglib-2\.0|libgobject-2\.0|libgio-2\.0|libgmodule-2\.0|libgthread-2\.0|libpcre2-8|libselinux|libmount|libblkid|libuuid|libcap|libgcrypt|libgpg-error|liblzma|libzstd|liblz4|libX11|libXext|libXau|libXdmcp|libXfixes|libXrender|libxcb[-a-z0-9]*|libdrm|libgbm|libEGL|libGL|libGLX|libGLdispatch|libOpenGL|libwayland-[a-z]+|libxkbcommon|libfontconfig|libfreetype|libharfbuzz|libfribidi|libpng16|libexpat|libbrotli[a-z]*|libgraphite2|libcairo|libcairo-gobject|libpango-1\.0|libpangocairo-1\.0|libpangoft2-1\.0|libgdk_pixbuf-2\.0|librsvg-2|libjpeg|libtiff|libwebp[a-z]*|libsharpyuv|libudev|libusb-1\.0|libcom_err|libkrb5[a-z]*|libk5crypto|libgssapi_krb5|libkeyutils|libcrypto|libssl|libsasl2|libldap[-_0-9a-z.]*|liblber[-0-9.]*|libcrypt|libtinfo|libncursesw|libpixman-1|libthai|libdatrie|libdeflate|libjbig|libLerc|libdw|libelf)\.so'
 
 mkdir -p "$CACHE_DIR"
 SNAP="$CACHE_DIR/vlc_${VLC_SNAP_REVISION}.snap"
@@ -182,7 +187,7 @@ done
 # Without these the player cannot decode, output audio or paint frames: a host whose ffmpeg
 # ABI differs from the snap's (Ubuntu 26.04 ships libavcodec 61, the snap links 60) drops them
 # above, which must fail the build rather than ship a bundle that plays nothing.
-for required in codec/libavcodec_plugin.so audio_output/libpulse_plugin.so video_output/libvmem_plugin.so access/libhttp_plugin.so access/libfilesystem_plugin.so video_chroma/libswscale_plugin.so; do
+for required in codec/libavcodec_plugin.so audio_output/libpulse_plugin.so video_output/libvmem_plugin.so video_output/libwdummy_plugin.so access/libimem_plugin.so access/libhttp_plugin.so access/libhttps_plugin.so access/libfilesystem_plugin.so video_chroma/libswscale_plugin.so; do
   if [ ! -f "$OUT/plugins/$required" ]; then
     echo "bundle-libvlc: required plugin $required is missing; run this script on Ubuntu 24.04 (the snap's core24 base) with vlc-plugin-base installed" >&2
     exit 1
@@ -217,6 +222,26 @@ if [ ! -f "$OUT/lib/libavcodec.so.60" ]; then
   echo "bundle-libvlc: libavcodec.so.60 was not copied into the bundle" >&2
   exit 1
 fi
+
+# GNOME Flatpak runtime ships libbz2.so.1 but not Ubuntu's libbz2.so.1.0 soname that
+# ffmpeg DT_NEEDED asks for. Force-copy these even when the build host resolves them.
+for soname in libbz2.so.1.0 libbsd.so.0 libmd.so.0; do
+  if [ -e "$OUT/lib/$soname" ]; then
+    continue
+  fi
+  src="$(find /usr/lib /lib -name "$soname" 2>/dev/null | head -1 || true)"
+  if [ -z "$src" ]; then
+    echo "bundle-libvlc: missing $soname on the build host (apt-get install libbz2-1.0 libbsd0)" >&2
+    exit 1
+  fi
+  cp -L "$src" "$OUT/lib/$soname"
+  echo "bundle-libvlc: forced $soname for Flatpak (from $src)"
+done
+
+# Drop bundled libva*: the Ubuntu snap copy is older than Flatpak codecs-extra / ffmpeg-full
+# need (vaMapBuffer2). Soft decode uses the runtime libva; shipping ours breaks WebKit HLS.
+rm -f "$OUT/lib"/libva.so* "$OUT/lib"/libva-*.so*
+echo "bundle-libvlc: removed libva* from private lib/ (use runtime libva)"
 
 # Every bundled object must resolve with the bundle plus the host libraries only.
 export LD_LIBRARY_PATH="$OUT:$OUT/lib"

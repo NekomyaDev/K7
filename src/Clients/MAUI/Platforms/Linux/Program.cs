@@ -25,6 +25,7 @@ public sealed class Program : GtkMauiApplication
         LinuxSessionEnvironment.EnsureDefaults();
         NativeAuthTrace.Install();
         LinuxCrashLog.Install();
+        LogBuildMarker();
 
         var callback = LinuxProtocolCallback.TryGetCommandLineCallback(args);
 
@@ -120,17 +121,38 @@ public sealed class Program : GtkMauiApplication
     /// Under WSLg (or with <c>K7_WEBKIT_DISABLE_SANDBOX=1</c>) the sandbox is disabled. Elsewhere
     /// the audio server directories are added to the sandbox instead.
     /// </summary>
+    /// <summary>
+    /// First stderr line: which build runs (assembly timestamp) and whether the libvlc debug
+    /// channel is on. Packaged installs (Flatpak, deb) are easy to mix up between iterations.
+    /// </summary>
+    private static void LogBuildMarker()
+    {
+        try
+        {
+            var location = typeof(Program).Assembly.Location;
+            var stamp = string.IsNullOrEmpty(location)
+                ? "unknown"
+                : File.GetLastWriteTimeUtc(location).ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture) + "Z";
+            var debug = Environment.GetEnvironmentVariable("K7_VLC_DEBUG") == "1";
+            Console.Error.WriteLine("K7 MAUI - build " + stamp + (debug ? " (K7_VLC_DEBUG on)" : ""));
+        }
+        catch
+        {
+        }
+    }
+
     private static void ConfigureWebKitSandbox()
     {
         try
         {
-            var wslg = Directory.Exists("/mnt/wslg");
-            // No usable GPU (WSLg: libEGL "failed to create dri2 screen"): WebKitGTK's DMA-BUF
-            // renderer leaves the view black after accelerated content (a <video>) goes away.
-            // Fall back to its software path there, or on request.
+            // Inside Flatpak /mnt/wslg is not mounted: fall back to the kernel banner.
+            var wslg = Directory.Exists("/mnt/wslg") || LinuxHostInfo.IsWslKernel;
+            // WSLg (no usable GPU) or on request: WebKitGTK's software path instead of the
+            // DMA-BUF renderer. Never on hypervisor guests in general: on a Hyper-V guest the
+            // DMA-BUF renderer works and disabling it stalls Video.js HLS (endless spinner).
+            // Compositing itself always stays on: MSE / HLS video does not play without it.
             if (wslg || Environment.GetEnvironmentVariable("K7_WEBKIT_SOFTWARE_RENDERING") == "1")
             {
-                // Compositing itself stays on: MSE / HLS video does not play without it.
                 if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("WEBKIT_DISABLE_DMABUF_RENDERER")))
                     LinuxSessionEnvironment.Export("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
                 Console.Error.WriteLine("K7 MAUI - WebKit DMA-BUF renderer disabled (WSLg or K7_WEBKIT_SOFTWARE_RENDERING)");

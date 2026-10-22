@@ -312,8 +312,23 @@ Same split as Windows, driven by the shared desktop glue
   VLC 3, exports `VLC_PLUGIN_PATH` and runs with `--no-plugins-cache` (read-only install, no
   `plugins.dat`), without a bundle the resolver falls back to the system `libvlc.so.12`. The
   bundle contents and how it is built are described in
-  [releasing.md](releasing.md#linux-libvlc-bundle). Auth goes through the same loopback
-  `VlcAuthProxy`, seek and audio / PGS track switches reopen with `:start-time` like Windows. Text subtitles are the XAML
+  [releasing.md](releasing.md#linux-libvlc-bundle); the Flatpak specifics (WebKit sandbox,
+  libvlc `proxy` helper stub, runtime sonames) are in [releasing.md](releasing.md#linux-flatpak).
+  The bundle must carry `wdummy`: `libvlc_video_set_callbacks` sets `window=dummy`, without
+  that module the video output never opens and vmem stays black. Direct Play feeds libvlc
+  through its media callbacks (`imem` access, `LinuxHttpRangeMediaInput`): the .NET side issues
+  the HTTP `Range` requests with the Authorization header, so neither the libvlc HTTP stack nor
+  the loopback proxy is involved. Inside Flatpak the modern libvlc HTTP module fails its
+  connection to the loopback proxy ("HTTP connection failure", before any packet reaches the
+  listener, TCP Fast Open or not) and VLC falls back to the legacy module, which cannot seek:
+  every resume and track switch became a linear read from byte 0 ("prefetch cannot seek").
+  Small forward seeks drain the current response; others open a new Range request. On
+  hypervisor guests (`LinuxHostInfo.IsVirtualMachine`, DMI vendor) the vmem picture is capped
+  at 1280 px wide (`K7_VLC_VMEM_MAX_WIDTH`, 0 = no cap): without a GPU the I0AL to BGRA
+  conversion and the texture upload run on the CPU and a 1080p pipeline falls behind (decoder
+  fifo full, HEVC reference errors, frozen picture).
+  `K7_VLC_ACCESS=http` restores the libvlc HTTP module behind `VlcAuthProxy` (the Windows
+  path). Seek and audio / PGS track switches reopen with `:start-time` like Windows. Text subtitles are the XAML
   sidecar label (no WinUI popup). Keyboard reaches the native overlay through a capture-phase
   `Gtk.EventControllerKey` on the window, fullscreen is `Gtk.Window.Fullscreen`.
   The CPU copy (decoded size x 4 bytes per frame) is fine for 1080p, a `Gtk.GLArea` /
@@ -321,8 +336,11 @@ Same split as Windows, driven by the shared desktop glue
 - **Native chrome over GTK** (`BlazorPage.Linux`, `LinuxWidgetStack`, `LinuxGestureBridge`):
   GTK4 paints siblings in child order and the labs layout panel never reorders them (its
   `MapZIndex` even inverts `InsertAfter(parent, null)`, which inserts first, not last), so the
-  page pins the stack explicitly when a Direct Play session starts: decode `Gtk.Picture` sent
-  to the back, `NativeVideoPlayerOverlay` brought to the front. The labs `BlazorWebViewHandler`
+  page re-applies the MAUI ZIndex order to the RootGrid children when a Direct Play session
+  starts (`LinuxWidgetStack.SortByZIndex`: decode surface 1, hidden WebView 2, close button 4,
+  overlay 5, sidecar label and stats HUD 6). ZIndex is the only source of truth: the explicit
+  send-to-back / bring-to-front pins used before fought the layout driver's sort on every tick
+  and left the subtitle label under the overlay panel. The labs `BlazorWebViewHandler`
   is not a `GtkViewHandler`, so `IsVisible` / `Opacity` / `InputTransparent` never reach the
   WebKit widget: the page calls `SetVisible(false)` / `SetCanTarget(false)` on it for the
   session and restores it when the session stops (HLS keeps the WebView). The labs handlers
@@ -368,7 +386,20 @@ Same split as Windows, driven by the shared desktop glue
   glyphs and the subtitle font like WinUI / Android would (GTK reports scale 1 under WSLg
   whatever the monitor, `K7_GTK_UI_SCALE` overrides the monitor-based factor). The label
   provider also re-emits colour / font / background in its own CSS block, because the labs
-  per-widget block is dropped as a whole when one value is rejected. HLS on Linux renders the
+  per-widget block is dropped as a whole when one value is rejected. WebKitGTK's user agent says Safari, so Video.js reports `IS_ANY_SAFARI` and VHS attaches MSE
+  the Safari way (two `<source>` children: the MediaSource blob URL, then the manifest as the
+  native-HLS fallback) instead of `video.src = blob`; inside the Flatpak runtime that left the
+  element on the manifest in `NETWORK_NO_SOURCE` with no error and no request (endless
+  spinner), so `videoplayer.js` hands VHS a `videojs.browser` copy without the Safari / iOS
+  flags when `window.K7_LINUX_GTK` is set (`applyLinuxGtkVideoJsQuirks`, before the player is
+  created). Video.js on the GTK host also gets `nativeAudioTracks: false` /
+  `nativeVideoTracks: false` next to its `overrideNative: true` (the combination VHS documents
+  for engines that expose native track lists on `<video>`, which WebKitGTK does). Like Windows,
+  VHS does not fetch the HLS resources itself: `windowsStreamFetch.js` routes them through the
+  .NET `WindowsStreamFetchJsBridge` (`FetchStreamAsync`, server HttpClient with the bearer), so
+  the page's resource timing never shows them (`hlsRequests:0` in the probe is normal) and a
+  bridge failure looks like "no request ever reaches the server"; the bridge traces its first
+  fetches and every failure as `stream fetch ...` lines. HLS on Linux renders the
   Blazor `<video>` element under the native overlay (same split as Windows HLS, not the Web HUD).
   Music: WebKitGTK's GStreamer backend fails on `blob:` audio, so `windowsStreamFetch.js` asks
   the bridge (`GetLocalStreamUrlAsync`) for a loopback `VlcAuthProxy` URL when the page carries
@@ -379,7 +410,14 @@ Same split as Windows, driven by the shared desktop glue
   interop takes). The Linux device registers `achannels:2` so HLS transcodes are stereo
   (WebKitGTK stalls on multichannel AAC), Direct Play keeps the original tracks. F9 in the
   player dumps the GTK stacks and the sidecar label state to the terminal, `vlc clock ...`
-  lines trace the raw libvlc clock every 5 seconds. The build also rewrites the
+  lines trace the raw libvlc clock every 5 seconds. `K7_VLC_DEBUG=1` echoes every libvlc log line
+  (all levels) to stderr as `vlc-dbg ...` (the bundle ships no logger module, so libvlc's own
+  verbose output has nowhere to go). The vmem display callback drops a frame
+  when GTK has not presented the previous one yet, instead of copying it: on GPU-less hosts the
+  alpha pass and copy on the vlc-vout thread stalled the decoder fifo (HEVC "Could not find ref
+  with POC", frozen picture). Linux HLS (Video.js) never draws the GTK sidecar label (Video.js
+  paints the cues) and switches audio tracks in-player like Android, a master reload left
+  WebKitGTK paused. The build also rewrites the
   Blazor-ApexCharts modules copied to the Linux output (`K7StripModuleVersionQuery`) so their
   static `import "./apexcharts.esm.js?ver=..."` loses the query the labs handler cannot serve.
   `Program.ConfigureWebKitSandbox` disables WebKit's bubblewrap sandbox under WSLg (or with
@@ -395,7 +433,9 @@ Same split as Windows, driven by the shared desktop glue
   Video.js hides once the clock advanced 0.75s (no Buffering state on WebKitGTK), and the
   volume popover only hides when GTK reports the pointer outside button and popover. Under
   WSLg (no usable GPU) or with `K7_WEBKIT_SOFTWARE_RENDERING=1`, `Program` exports
-  `WEBKIT_DISABLE_DMABUF_RENDERER=1` (compositing itself stays on, MSE video needs it): the
+  `WEBKIT_DISABLE_DMABUF_RENDERER=1` (compositing itself stays on, MSE video needs it; never
+  on other hosts, virtual machines included: on a Hyper-V guest the DMA-BUF renderer works and
+  disabling it left Video.js HLS on an endless spinner): the
   DMA-BUF renderer otherwise leaves the view black once an accelerated `<video>` goes away, the
   page also unmaps / maps the WebView whenever it becomes interactive again so WebKit redraws.
   `K7_GTK_TRACE_POINTER=1` logs the GTK enter / leave the gesture bridge relays. GTK skips the
@@ -647,8 +687,13 @@ not past mid-GOP. Do not micro-rebase **audio copy** onto `#EXTINF`.
   never selects a text rendition until the sidecar VTT is ready: playback starts with text
   disabled (`TryDisableAndroidTextTrack` right after `Prepare`, so a forced/AUTOSELECT
   rendition cannot auto-load and 503-stall A/V), then `WarmAndroidHlsSubtitleThenSelectAsync`
-  polls `GET /subtitles/{index}.vtt` (503 retry) and applies the Exo text override once the
-  server returns 200. Audio and video are never gated on ffmpeg subtitle extraction, and the
+  polls `GET /subtitles/{index}.vtt` and applies the Exo text override once the server
+  returns 200. 503 means the extraction is still running (ffmpeg reads the whole file, minutes
+  on a large remux), so the poll follows `SubtitleVttRetryPolicy` (1 s between the first polls,
+  then 3 s, bounded at 10 minutes of elapsed time, transient network errors retried) and logs
+  `WarmHlsSubtitle gave up` when it stops. The previous fixed 40 attempts gave up silently and
+  left the selected track off until the user toggled it (reported on a Shield after
+  "next episode"). Audio and video are never gated on ffmpeg subtitle extraction, and the
   selected rendition never hits a 503 (which previously surfaced as an ExoPlayer
   "media could not be loaded" error and its placeholder art on the panel).
 
@@ -656,8 +701,10 @@ Android video clock comes from ExoPlayer (`ExoPlaybackBridge` / `GetExoPlaybackP
 into `IPlayerService`), not toolkit `MediaElement.Position`. A skip or seekbar tap on a stale
 toolkit position used to jump minutes backward. Stale `.m4s` from an older rebase can be
 deleted from the transcode cache. Sidecar SRT uses `GET /api/indexed-files/{id}/subtitles/{index}.vtt`
-(503 retry while Exo or the XAML loader waits). Web Video.js wraps VHS xhr the same way
-(`ensureVtt503RetryXhr` in `videoplayer.js`): exponential backoff on `.vtt` 503 so VHS
+(503 polled on the same `SubtitleVttRetryPolicy` schedule by the XAML sidecar loader, which
+used to give up after 8 polls). Web Video.js wraps VHS xhr the same way
+(`ensureVtt503RetryXhr` in `videoplayer.js`): exponential backoff on `.vtt` 503 (`K7_VTT_503_MAX_ATTEMPTS`, about ten minutes like the
+native policy) so VHS
 does not disable the subtitle track on the first cold-cache miss. Retries install at the
 native `XMLHttpRequest` layer (so VHS cannot bypass module wrappers) and also wrap
 `videojs.xhr` while keeping `Vhs.xhr.original = true`. Windows Direct uses the

@@ -61,6 +61,7 @@ internal sealed class VlcAuthProxy : IDisposable
     public bool LogRequests { get; set; }
 
     private int _tracedRequests;
+    private int _tracedAccepts;
 
     public string? TargetUrl => _targetUrl;
 
@@ -301,6 +302,10 @@ internal sealed class VlcAuthProxy : IDisposable
             try
             {
                 client = await _listener.AcceptTcpClientAsync(cancellationToken).ConfigureAwait(false);
+                // Connections that never turn into a logged request (client gone before the
+                // headers) are the signature of a libvlc access module failing its open.
+                if (LogRequests || _tracedAccepts++ < 12)
+                    VlcPlayerLog.Info("vlc-proxy accept " + (client.Client.RemoteEndPoint?.ToString() ?? "?"));
                 _ = HandleClientAsync(client, cancellationToken);
             }
             catch (OperationCanceledException)
@@ -334,8 +339,13 @@ internal sealed class VlcAuthProxy : IDisposable
                             out var method,
                             out var pathAndQuery,
                             out var range,
-                            out var keepAlive))
+                            out var keepAlive,
+                            out var received))
+                    {
+                        if (received is not null && (LogRequests || _tracedAccepts <= 12))
+                            VlcPlayerLog.Warn("vlc-proxy request incomplete " + received);
                         return;
+                    }
 
                     // The first requests of every session show how the client seeks (Range or
                     // sequential read) without flooding the log on long playbacks.
@@ -495,7 +505,13 @@ internal sealed class VlcAuthProxy : IDisposable
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 if (VlcPlayerLog.IsExpectedClientDisconnect(ex))
+                {
+                    // Normally silent (seek storms). The first connections of a session are
+                    // traced: a client that resets right after connecting is a failing open.
+                    if (LogRequests || _tracedAccepts <= 12)
+                        VlcPlayerLog.Info("vlc-proxy client gone " + ex.GetType().Name + " " + ex.Message);
                     return;
+                }
 
                 VlcPlayerLog.Warn("vlc-proxy forward fail " + ex.GetType().Name + " " + ex.Message);
             }
@@ -1029,19 +1045,28 @@ internal sealed class VlcAuthProxy : IDisposable
         out string method,
         out string pathAndQuery,
         out string? range,
-        out bool keepAlive)
+        out bool keepAlive,
+        out string? received)
     {
         method = "GET";
         pathAndQuery = "/";
         range = null;
         keepAlive = true;
+        received = null;
         var buffer = new byte[8192];
         var filled = 0;
         while (filled < buffer.Length)
         {
             var n = stream.Read(buffer, filled, buffer.Length - filled);
             if (n <= 0)
+            {
+                // Closed before a complete request: report what came in (first bytes, control
+                // characters escaped) so the failing client side can be identified.
+                received = filled == 0
+                    ? "bytes=0 (closed without sending)"
+                    : "bytes=" + filled + " head=" + Escape(Encoding.ASCII.GetString(buffer, 0, Math.Min(filled, 160)));
                 return false;
+            }
 
             filled += n;
             var end = IndexOfHeaderEnd(buffer, filled);
@@ -1081,6 +1106,24 @@ internal sealed class VlcAuthProxy : IDisposable
         }
 
         return false;
+    }
+
+    private static string Escape(string text)
+    {
+        var sb = new StringBuilder(text.Length + 8);
+        foreach (var c in text)
+        {
+            if (c == '\r')
+                sb.Append("\\r");
+            else if (c == '\n')
+                sb.Append("\\n");
+            else if (c < ' ' || c > '~')
+                sb.Append('.');
+            else
+                sb.Append(c);
+        }
+
+        return sb.ToString();
     }
 
     private static int IndexOfHeaderEnd(byte[] buffer, int length)

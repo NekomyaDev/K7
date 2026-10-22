@@ -184,9 +184,12 @@ public partial class BlazorPage
     {
         try
         {
-            var surface = (_vlcPlayer as LinuxVlcVideoPlayer)?.Surface;
-            LinuxWidgetStack.SendToBack(surface);
-            LinuxWidgetStack.BringToFront(LinuxWidgetStack.PlatformWidget(_nativeOverlay));
+            // MAUI ZIndex is the single source of truth for the GTK child order (video surface
+            // 1, hidden WebView 2, close button 4, overlay 5, sidecar label and stats HUD 6).
+            // The explicit send-to-back / bring-to-front pins that used to live here fought the
+            // ZIndex sort of LinuxRootLayoutDriver on every layout tick ("gtk zsort ...
+            // reordered" never converged) and left the subtitle label under the overlay panel.
+            LinuxWidgetStack.SortByZIndex(RootGrid);
             LinuxWidgetStack.Dump(reason, LinuxWidgetStack.PlatformWidget(RootGrid));
         }
         catch (Exception ex)
@@ -337,11 +340,74 @@ public partial class BlazorPage
         _nativeOverlay?.NotifyDesktopPointerMoved();
     }
 
+    /// <summary>
+    /// Logs what the page knows about the HTML5 video (Video.js players, element source and
+    /// readiness, media error, container visibility, HLS resource requests seen by the page)
+    /// as "web video probe" lines: the WebKit console is not always reachable (Flatpak, remote
+    /// desktop), this is.
+    /// </summary>
+    private const string LinuxWebVideoProbeJs = "(function(){try{var v=document.querySelector('video');var vc=document.querySelector('.video-container');var cs=vc?getComputedStyle(vc):null;var players=(window.videojs&&videojs.getPlayers)?Object.keys(videojs.getPlayers()):[];var err=(v&&v.error)?{code:v.error.code,msg:v.error.message}:null;var res=(window.performance&&performance.getEntriesByType)?performance.getEntriesByType('resource'):[];var hls=0;var last='';for(var i=0;i<res.length;i++){var n=res[i].name||'';if(/m3u8|\\.ts(\\?|$)|m4s|segment/i.test(n)){hls++;last=n;}}return JSON.stringify({href:location.href,visibility:document.visibilityState,k7:!!window.K7,setActive:typeof(window.K7&&K7.setNativePlayerActive),vjs:!!window.videojs,players:players,video:!!v,src:v?(v.currentSrc||v.getAttribute('src')||''):'',ready:v?v.readyState:-1,net:v?v.networkState:-1,paused:v?v.paused:null,time:v?v.currentTime:-1,err:err,container:cs?(cs.display+'/'+cs.visibility+'/'+cs.opacity):'-',mse:!!window.MediaSource,nativeHls:v?v.canPlayType('application/vnd.apple.mpegurl'):'-',tech:(function(){try{var p=(window.videojs&&players.length)?videojs.getPlayers()[players[0]]:null;return p?((p.tech_?p.tech_.name_:'-')+'/'+((p.tech_&&p.tech_.vhs)?'vhs':'native')):'-';}catch(e){return 'err';}})(),videos:document.querySelectorAll('video').length,origin:location.origin,ua:(navigator.userAgent||'').slice(-70),safari:!!(window.videojs&&videojs.browser&&videojs.browser.IS_ANY_SAFARI),gtkQuirks:!!(window.videojs&&videojs.browser&&videojs.browser.__k7LinuxGtk),mms:!!window.ManagedMediaSource,bridge:{ref:!!(window.K7&&K7._windowsStreamFetchRef),installed:!!window.__k7WindowsStreamXhrInstalled,xhrWrapped:!!(window.videojs&&videojs.xhr&&videojs.xhr.__k7WindowsStreamBridge)},player:(function(){try{var p=(window.videojs&&players.length)?videojs.getPlayers()[players[0]]:null;if(!p)return null;var el=p.tech_&&p.tech_.el_;var h=p.tech_&&p.tech_.vhs;var pc=h&&h.playlistController_;var pl=pc&&pc.mainPlaylistLoader_;return {techName:p.techName_,src:(p.currentSrc()||'').slice(0,80),type:p.currentType(),ready:p.readyState(),net:p.networkState(),paused:p.paused(),err:p.error()?{code:p.error().code,msg:p.error().message}:null,sameEl:el===v,elSrc:el?(el.getAttribute('src')||'').slice(0,60):'-',elCur:el?(el.currentSrc||'').slice(0,60):'-',ms:pc&&pc.mediaSource?pc.mediaSource.readyState:'-',msUrl:h&&h.mediaSourceUrl_?String(h.mediaSourceUrl_).slice(0,50):'-',loader:pl?pl.state:'-',hasMain:!!(h&&h.playlists&&h.playlists.main),pending:(pl&&pl.request)?1:0,usingMms:pc?!!pc.usingManagedMediaSource_:'-',sources:el?Array.prototype.map.call(el.querySelectorAll('source'),function(s){return (s.getAttribute('src')||'').slice(0,40);}):'-'};}catch(e){return 'err '+e;}})(),log:(window.__k7Log||[]).slice(-20),hlsRequests:hls,lastHls:last.slice(-80)});}catch(x){return 'probe-error '+x;}})()";
+
+    internal void ScheduleLinuxWebVideoProbes()
+    {
+        foreach (var delayMs in new uint[] { 2000, 6000, 15000 })
+        {
+            var tag = "hls+" + (delayMs / 1000).ToString(System.Globalization.CultureInfo.InvariantCulture) + "s";
+            GLib.Functions.TimeoutAdd(0, delayMs, () =>
+            {
+                ProbeLinuxWebVideo(tag);
+                return false;
+            });
+        }
+    }
+
+    private void ProbeLinuxWebVideo(string tag)
+    {
+        try
+        {
+            if (blazorWebView.Handler?.PlatformView is not Gtk.Widget root || FindWebKitView(root) is not { } webView)
+            {
+                VlcPlayerLog.Info("web video probe " + tag + " no webview");
+                return;
+            }
+
+            webView.EvaluateJavascriptAsync(LinuxWebVideoProbeJs).ContinueWith(
+                task =>
+                {
+                    string text;
+                    if (task.IsFaulted)
+                    {
+                        text = "fail " + (task.Exception?.GetBaseException().Message ?? "");
+                    }
+                    else
+                    {
+                        try
+                        {
+                            text = task.Result?.ToString() ?? "null";
+                        }
+                        catch (Exception ex)
+                        {
+                            text = "fail " + ex.GetType().Name + " " + ex.Message;
+                        }
+                    }
+
+                    VlcPlayerLog.Info("web video probe " + tag + " " + text);
+                },
+                TaskScheduler.Default);
+        }
+        catch (Exception ex)
+        {
+            VlcPlayerLog.Warn("web video probe " + tag + " " + ex.GetType().Name + " " + ex.Message);
+        }
+    }
+
     private bool OnLinuxKeyPressed(Gtk.EventControllerKey sender, Gtk.EventControllerKey.KeyPressedSignalArgs args)
     {
         if (args.Keyval == Gdk.Constants.KEY_F9)
         {
-            // Diagnostic: GTK stack of the page root and of the overlay, sidecar label state.
+            // Diagnostic: GTK stack of the page root and of the overlay, sidecar label state,
+            // HTML5 video state.
+            ProbeLinuxWebVideo("f9");
             ApplyLinuxVideoStack("f9");
             LinuxWidgetStack.Dump("f9 overlay", LinuxWidgetStack.PlatformWidget(_nativeOverlay));
             LinuxWidgetStack.DumpLabels("f9 labels", LinuxWidgetStack.PlatformWidget(RootGrid));
@@ -452,6 +518,7 @@ public partial class BlazorPage
             securityManager.RegisterUriSchemeAsSecure("app");
             InjectLinuxHostMarker(webView!);
             EnableWebKitInspectorIfRequested(webView!);
+            EnableWebKitConsoleIfRequested(webView!);
         }
         catch (Exception ex)
         {
@@ -460,6 +527,32 @@ public partial class BlazorPage
     }
 
     private static bool _webKitInspectorShown;
+    private static bool _webKitConsoleEnabled;
+
+    /// <summary>
+    /// <c>K7_WEBKIT_CONSOLE=1</c> copies the page console (console.log, JS errors, failed
+    /// fetches) to the process stdout: the only way to see Blazor / Video.js errors from a
+    /// terminal when the inspector window is not practical (Flatpak, remote desktop).
+    /// </summary>
+    private static void EnableWebKitConsoleIfRequested(WebKit.WebView webView)
+    {
+        if (_webKitConsoleEnabled
+            || Environment.GetEnvironmentVariable("K7_WEBKIT_CONSOLE") is not "1")
+            return;
+
+        try
+        {
+            var settings = webView.GetSettings();
+            settings.EnableWriteConsoleMessagesToStdout = true;
+            webView.SetSettings(settings);
+            _webKitConsoleEnabled = true;
+            Console.Error.WriteLine("K7 MAUI - WebKit console copied to stdout");
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine("K7 MAUI - WebKit console failed: " + ex.Message);
+        }
+    }
     private static bool _linuxHostMarkerInjected;
 
     /// <summary>
@@ -472,9 +565,20 @@ public partial class BlazorPage
         // The labs scheme handler looks assets up with their query string and answers 404
         // (Blazor-ApexCharts imports "...js?ver=x"). Blazor's "import" interop builds the URL
         // through new URL(...).toString(): drop the query for app:// URLs there.
+        // Also keeps the last console warnings / errors and uncaught failures in
+        // window.__k7Log for the "web video probe" lines (the WebKit console is not always
+        // reachable), and widens the resource timing buffer the probe counts requests from.
         const string marker = "window.K7_LINUX_GTK = true;"
             + "(function(){try{var t=URL.prototype.toString;URL.prototype.toString=function(){var s=t.call(this);"
-            + "return (this.protocol==='app:'&&this.search)?s.split('?')[0]:s;};}catch(e){}})();";
+            + "return (this.protocol==='app:'&&this.search)?s.split('?')[0]:s;};}catch(e){}})();"
+            + "(function(){try{if(window.__k7Log)return;var L=window.__k7Log=[];"
+            + "function push(k,args){try{var m=k+': '+Array.prototype.map.call(args,function(a){try{return typeof a==='string'?a:((a&&a.message)?a.message:JSON.stringify(a));}catch(e){return String(a);}}).join(' ');"
+            + "L.push(m.slice(0,300));if(L.length>60)L.shift();}catch(e){}}"
+            + "['warn','error'].forEach(function(k){var o=console[k];console[k]=function(){push(k,arguments);return o.apply(console,arguments);};});"
+            + "window.addEventListener('error',function(e){push('onerror',[(e.message||'')+' '+(e.filename||'')+':'+(e.lineno||'')]);});"
+            + "window.addEventListener('unhandledrejection',function(e){push('unhandledrejection',[(e.reason&&e.reason.message)||String(e.reason)]);});"
+            + "if(window.performance&&performance.setResourceTimingBufferSize)performance.setResourceTimingBufferSize(2000);"
+            + "}catch(e){}})();";
         if (!_linuxHostMarkerInjected)
         {
             _linuxHostMarkerInjected = true;

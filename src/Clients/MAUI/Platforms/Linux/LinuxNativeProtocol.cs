@@ -16,6 +16,9 @@ internal static class LinuxNativeProtocol
 
     public static void EnsureRegistered()
     {
+        if (!LinuxPackaging.ShouldRegisterNativeProtocol())
+            return;
+
         var processPath = Environment.ProcessPath;
         if (string.IsNullOrEmpty(processPath))
             return;

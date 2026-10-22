@@ -47,18 +47,26 @@ public static class LinuxLibVlcBundle
     /// <summary>
     /// Libraries to load by full path before libvlc itself: the private copies (ffmpeg and
     /// friends, libvlc_pulse), then libvlccore. The dynamic loader matches DT_NEEDED entries
-    /// against already-loaded objects by soname, so neither LD_LIBRARY_PATH nor an rpath is
-    /// needed and a distro VLC 3 libvlccore.so.9 never shadows the bundled one. The order
-    /// among the private copies is unknown (no dependency graph here): callers retry the
-    /// failures until a pass makes no progress.
+    /// against already-loaded objects by soname when those were dlopen'ed first. Callers also
+    /// put the bundle dirs on <c>LD_LIBRARY_PATH</c> (Flatpak / no RPATH). The order among the
+    /// private copies is unknown (no dependency graph here): callers retry the failures until
+    /// a pass makes no progress.
     /// </summary>
     public static IReadOnlyList<string> EnumeratePreloadLibraries(Layout layout)
     {
         var libraries = new List<string>();
         if (Directory.Exists(layout.LibrariesDirectory))
         {
+            // Skip libva*: the bundle ships an older libva that shadows the Flatpak
+            // runtime and breaks WebKit/GStreamer HLS (vaMapBuffer2). System libva is fine
+            // for VLC's soft decode path.
             libraries.AddRange(Directory.EnumerateFiles(layout.LibrariesDirectory)
-                .Where(file => Path.GetFileName(file).Contains(".so", StringComparison.Ordinal))
+                .Where(file =>
+                {
+                    var name = Path.GetFileName(file);
+                    return name.Contains(".so", StringComparison.Ordinal)
+                        && !name.StartsWith("libva", StringComparison.Ordinal);
+                })
                 .OrderBy(file => file, StringComparer.Ordinal));
         }
 
