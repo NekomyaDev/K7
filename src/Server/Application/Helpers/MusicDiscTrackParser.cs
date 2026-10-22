@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using K7.Server.Domain.Constants;
 
 namespace K7.Server.Application.Helpers;
 
@@ -72,7 +73,9 @@ public static partial class MusicDiscTrackParser
         if (string.IsNullOrWhiteSpace(fileName))
             return null;
 
-        var stem = Path.GetFileNameWithoutExtension(fileName.Trim());
+        // IndexedFile.Name is already extension-less. Path.GetFileNameWithoutExtension would
+        // truncate titles that contain dots ("02. Song", "Song (feat. Other)").
+        var stem = StripKnownAudioExtension(fileName.Trim());
         if (string.IsNullOrWhiteSpace(stem))
             return null;
 
@@ -142,6 +145,19 @@ public static partial class MusicDiscTrackParser
 
     private static string? NullIfEmpty(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static string StripKnownAudioExtension(string fileName)
+    {
+        var name = Path.GetFileName(fileName);
+        var extension = Path.GetExtension(name);
+        if (extension.Length > 0
+            && Constants.AudioFileExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase))
+        {
+            return Path.GetFileNameWithoutExtension(name);
+        }
+
+        return name;
+    }
 
     // "Disc 2 - 03 - Title", "CD2 Track 01 Title", "Disk 1 - Title"
     [GeneratedRegex(

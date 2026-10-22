@@ -46,6 +46,9 @@ public class MusicDiscTrackParserTests
 
     [TestCase("01 - Gone Hollywood.flac", 1, "Gone Hollywood")]
     [TestCase("12. Child of Vision.flac", 12, "Child of Vision")]
+    [TestCase("02. Another Song", 2, "Another Song")]
+    [TestCase("12 - Song (feat. Other)", 12, "Song (feat. Other)")]
+    [TestCase("12 - Song (feat. Other).flac", 12, "Song (feat. Other)")]
     public void TryParseFileName_ShouldParseTrackOnly(string fileName, int track, string title)
     {
         var parsed = MusicDiscTrackParser.TryParseFileName(fileName);
