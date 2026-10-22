@@ -221,19 +221,10 @@
 
   <!-- Linux: libvlc 4 bundle (tools/linux/bundle-libvlc.sh output, gitignored) copied next to the
        app as libvlc/linux-x64, the counterpart of libvlc/win-x64 on Windows. Without it the client
-       falls back to a system VLC 4. Deb* properties feed the labs CreateDeb targets
-       (dotnet publish -r linux-x64 -p:CreateDeb=true). -->
+       falls back to a system VLC 4. The publish tree is shipped as a Flatpak only
+       (tools/linux/build-flatpak.sh); the Debian package and the tarball were dropped. -->
   <PropertyGroup>
     <K7LinuxLibVlcDir Condition="'$(K7LinuxLibVlcDir)' == ''">$(MSBuildProjectDirectory)/libvlc/linux-x64</K7LinuxLibVlcDir>
-    <DebPackageName>k7</DebPackageName>
-    <DebSection>video</DebSection>
-    <DebMaintainer>K7 contributors &lt;noreply@github.com&gt;</DebMaintainer>
-    <DebHomepage>https://github.com/kaybi-gh/K7</DebHomepage>
-    <DebDescription>K7 media client (music, movies, TV shows)</DebDescription>
-    <DebCategories>AudioVideo;Video;Audio;Player;</DebCategories>
-    <!-- GTK4 / WebKitGTK host, the host libraries the bundled libvlc keeps using (see HOST_LIBS in
-         bundle-libvlc.sh), GStreamer for WebKitGTK media (music, HLS) and xdg-utils for k7://. -->
-    <DebDepends>libc6 (&gt;= 2.39), libstdc++6, libgtk-4-1 (&gt;= 4.12.0), libwebkitgtk-6.0-4, libpulse0, libdbus-1-3, libgnutls30t64 | libgnutls30, libssl3t64 | libssl3, libkrb5-3, xdg-utils, gstreamer1.0-plugins-good, gstreamer1.0-plugins-bad, gstreamer1.0-libav, gstreamer1.0-pulseaudio, gstreamer1.0-gl</DebDepends>
   </PropertyGroup>
 
   <Target Name="K7CopyLibVlcLinuxNatives"
@@ -249,7 +240,6 @@
 
   <Target Name="K7PublishLibVlcLinuxNatives"
           AfterTargets="Publish"
-          BeforeTargets="_PrepareDebStagingDir;_PrepareAppImageDir"
           Condition="'$(TargetFramework)' == 'net10.0'">
     <Message Importance="high"
              Condition="!Exists('$(K7LinuxLibVlcDir)/libvlc.so.12')"
@@ -260,33 +250,6 @@
     <Copy SourceFiles="@(_K7LibVlcLinuxPublishFiles)"
           DestinationFiles="@(_K7LibVlcLinuxPublishFiles->'$(PublishDir)libvlc/linux-x64/%(RecursiveDir)%(Filename)%(Extension)')"
           SkipUnchangedFiles="true" />
-  </Target>
-
-  <!-- The labs .desktop entry has no MimeType (k7:// callbacks) and no %u, and the labs icon copy
-       needs a MauiIcon item (removed for this TFM): rewrite both in the Deb staging tree. -->
-  <Target Name="K7PolishLinuxDeb"
-          AfterTargets="_GenerateDebDesktopFile;_CopyDebIcon"
-          BeforeTargets="CreateDeb"
-          Condition="'$(_DebEnabled)' == 'true'">
-    <PropertyGroup>
-      <_K7DebDesktopEntry>[Desktop Entry]
-Type=Application
-Name=K7
-Comment=$(DebDescription)
-Exec=$(DebPackageName) %u
-Icon=$(ApplicationId)
-Terminal=false
-StartupWMClass=$(ApplicationId)
-Categories=AudioVideo%3BVideo%3BAudio%3BPlayer%3B
-MimeType=x-scheme-handler/k7%3B
-Keywords=media%3Bmusic%3Bmovies%3Bseries%3B
-</_K7DebDesktopEntry>
-    </PropertyGroup>
-    <WriteLinesToFile File="$(_DebStagingDir)/usr/share/applications/$(ApplicationId).desktop"
-                      Lines="$(_K7DebDesktopEntry)"
-                      Overwrite="true" />
-    <Copy SourceFiles="$(MSBuildProjectDirectory)/../../../branding/icon.png"
-          DestinationFiles="$(_DebStagingDir)/usr/share/icons/hicolor/512x512/apps/$(ApplicationId).png" />
   </Target>
 
   <!-- Linux: the GTK BlazorWebView serves wwwroot from the output folder (PhysicalFileProvider).

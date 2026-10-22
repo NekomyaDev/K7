@@ -23,7 +23,7 @@ template: |
   - **Docker (import):** `ghcr.io/kaybi-gh/k7-import:$RESOLVED_VERSION`
   - **Android:** `K7-$RESOLVED_VERSION-android.apk`
   - **Windows:** `K7-$RESOLVED_VERSION-win-x64.zip`
-  - **Linux:** `K7-$RESOLVED_VERSION-linux-x64.deb` (Debian / Ubuntu), `K7-$RESOLVED_VERSION-linux-x64.tar.gz`
+  - **Linux:** `K7-$RESOLVED_VERSION-linux-x64.flatpak` (Flatpak bundle)
   - **iOS:** `K7-$RESOLVED_VERSION-ios-sideload.ipa` (AltStore source: `apps.json`)
 
   ## New contributors

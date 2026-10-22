@@ -297,9 +297,10 @@ jobs:
             --clobber
 
   # Ubuntu 24.04 runner on purpose: the bundled libvlc 4 (VideoLAN snap, base core24) and
-  # the ffmpeg libraries copied next to it target glibc 2.39, the same floor as GTK 4.12 /
-  # WebKitGTK 6.0. Produces a .deb (Debian / Ubuntu, dependencies resolved by apt) and a
-  # tarball (any other distro with GTK4 + WebKitGTK), both with libvlc 4 inside.
+  # the ffmpeg libraries copied next to it target glibc 2.39, the floor of the GNOME 49
+  # runtime. Produces the Flatpak bundle (GNOME Platform, libvlc 4 inside), the only Linux
+  # package: the .deb and the tarball depended on the host GTK4 / WebKitGTK / GStreamer
+  # versions (Ubuntu 24.04 in practice) and were dropped.
   publish-linux:
     needs: resolve
     runs-on: ubuntu-24.04
@@ -315,11 +316,13 @@ jobs:
 
       # vlc-plugin-base / vlc-plugin-video-output (distro VLC 3) only bring the shared
       # libraries the VLC 4 plugins link against (ffmpeg 6.1, dav1d, matroska, ...), which
-      # bundle-libvlc.sh copies through ldd.
+      # bundle-libvlc.sh copies through ldd. flatpak-builder packs the .flatpak bundle.
       - name: Install packaging tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends squashfs-tools vlc-plugin-base vlc-plugin-video-output
+          sudo apt-get install -y --no-install-recommends \
+            squashfs-tools vlc-plugin-base vlc-plugin-video-output \
+            flatpak flatpak-builder
 
       - name: Bundle libvlc 4
         run: bash tools/linux/bundle-libvlc.sh
@@ -331,16 +334,14 @@ jobs:
           dotnet tool restore
           dotnet tool run libman -- restore
 
-      - name: Publish Linux (deb + tarball)
+      - name: Publish Linux (flatpak)
         id: linux
         run: |
           set -euo pipefail
           VERSION="${{ needs.resolve.outputs.version }}"
           NAME="K7-${VERSION}-linux-x64"
           OUT="${RUNNER_TEMP}/${NAME}"
-          DEB_DIR="${RUNNER_TEMP}/deb"
           # K7PublishPlatform=linux: plain net10.0 TFM (labs GTK4 backend, no MAUI workload).
-          # CreateDeb: labs packaging targets. K7PolishLinuxDeb fixes the desktop entry and icon.
           dotnet publish "${MAUI_PROJECT}" \
             -f net10.0 \
             -c Release \
@@ -348,28 +349,20 @@ jobs:
             --self-contained true \
             -p:K7PublishPlatform=linux \
             -p:Version="${VERSION}" \
-            -p:CreateDeb=true \
-            -p:DebOutputDir="${DEB_DIR}" \
-            -p:DebFileName="${NAME}.deb" \
             -o "${OUT}"
           test -f "${OUT}/K7.Clients.MAUI"
           test -f "${OUT}/libvlc/linux-x64/libvlc.so.12"
-          test -f "${DEB_DIR}/${NAME}.deb"
-          dpkg-deb --info "${DEB_DIR}/${NAME}.deb"
-          # Friendly launcher for the tarball, like K7.exe on Windows (the .deb has /usr/bin/k7).
-          printf '%s\n' '#!/bin/sh' 'exec "$(dirname "$(readlink -f "$0")")/K7.Clients.MAUI" "$@"' > "${OUT}/k7"
-          chmod +x "${OUT}/k7" "${OUT}/K7.Clients.MAUI"
-          tar -C "${RUNNER_TEMP}" -czf "${RUNNER_TEMP}/${NAME}.tar.gz" "${NAME}"
-          echo "deb=${DEB_DIR}/${NAME}.deb" >> "${GITHUB_OUTPUT}"
-          echo "tar=${RUNNER_TEMP}/${NAME}.tar.gz" >> "${GITHUB_OUTPUT}"
+          chmod +x "${OUT}/K7.Clients.MAUI"
+          bash tools/linux/build-flatpak.sh "${OUT}" "${VERSION}" "${RUNNER_TEMP}/${NAME}.flatpak"
+          test -f "${RUNNER_TEMP}/${NAME}.flatpak"
+          echo "flatpak=${RUNNER_TEMP}/${NAME}.flatpak" >> "${GITHUB_OUTPUT}"
 
       - name: Upload Linux assets to release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release upload "${{ needs.resolve.outputs.tag }}" \
-            "${{ steps.linux.outputs.deb }}" \
-            "${{ steps.linux.outputs.tar }}" \
+            "${{ steps.linux.outputs.flatpak }}" \
             --repo "${{ github.repository }}" \
             --clobber
 
@@ -627,8 +620,7 @@ jobs:
           echo "Assets on ${tag}: ${assets}"
           echo "${assets}" | grep -q 'android.apk'
           echo "${assets}" | grep -q 'win-x64.zip'
-          echo "${assets}" | grep -q 'linux-x64.deb'
-          echo "${assets}" | grep -q 'linux-x64.tar.gz'
+          echo "${assets}" | grep -q 'linux-x64.flatpak'
           echo "${assets}" | grep -q 'ios-sideload.ipa'
           echo "${assets}" | grep -q 'apps.json'
           if [ "${{ needs.resolve.outputs.is_draft }}" = "true" ]; then
