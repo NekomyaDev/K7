@@ -1,0 +1,57 @@
+# Flatpak manifest for the K7 Linux client (GTK4 + WebKitGTK).
+# Consumes a pre-built self-contained publish directory (see tools/linux/build-flatpak.sh).
+# Not a Flathub submission layout: release CI ships a .flatpak bundle from GitHub Releases.
+# App id must be reverse-DNS (Flatpak requires at least two periods). Matches ApplicationId.
+app-id: com.k7.maui
+runtime: org.gnome.Platform
+runtime-version: '49'
+sdk: org.gnome.Sdk
+command: k7
+# GNOME 49 sits on freedesktop 25.08: org.freedesktop.Platform.ffmpeg-full does NOT
+# exist for that branch. Codecs come from the runtime's codecs-extra extension
+# (auto-installed). The wrapper demotes broken libav/VA paths for WebKit HLS.
+finish-args:
+  # Desktop session
+  - --share=ipc
+  - --socket=fallback-x11
+  - --socket=wayland
+  - --device=dri
+  # Talk to the K7 server and open the system browser for OIDC
+  - --share=network
+  # LibVLC Pulse output and WebKitGTK HTML5 audio
+  - --socket=pulseaudio
+  # Optional offline / export drops
+  - --filesystem=xdg-download
+  # Notifications (playback / download hints)
+  - --talk-name=org.freedesktop.Notifications
+  # Open authorize URLs in the host browser (xdg-desktop-portal OpenURI)
+  - --talk-name=org.freedesktop.portal.Desktop
+  # Escape to the host for xdg-open / WSL cmd.exe when the portal is broken (WSLg)
+  - --talk-name=org.freedesktop.Flatpak
+modules:
+  - name: k7
+    buildsystem: simple
+    build-commands:
+      - install -Dm755 k7-wrapper.sh /app/bin/k7
+      # VLC vlc_getProxyUrl spawns `proxy <url>`. Empty = direct (required for libhttps loopback).
+      - install -Dm755 proxy /app/bin/proxy
+      - mkdir -p /app/lib/k7
+      - cp -a publish/. /app/lib/k7/
+      - chmod +x /app/lib/k7/K7.Clients.MAUI
+      - install -Dm644 com.k7.maui.desktop /app/share/applications/com.k7.maui.desktop
+      - install -Dm644 com.k7.maui.png /app/share/icons/hicolor/512x512/apps/com.k7.maui.png
+      - install -Dm644 com.k7.maui.metainfo.xml /app/share/metainfo/com.k7.maui.metainfo.xml
+    sources:
+      - type: file
+        path: k7-wrapper.sh
+      - type: file
+        path: proxy
+      - type: file
+        path: com.k7.maui.desktop
+      - type: file
+        path: com.k7.maui.metainfo.xml
+      - type: file
+        path: com.k7.maui.png
+      - type: dir
+        path: publish
+        dest: publish

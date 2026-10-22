@@ -1,0 +1,7 @@
+#!/bin/sh
+# VLC calls `proxy <url>` from vlc_getProxyUrl (posix/netconf.c).
+# Empty stdout is a PARSE ERROR: VLC then falls back to $http_proxy (often set
+# inside Flatpak / desktop sessions) and access/http fails loopback with
+# "HTTP connection failure". Official no-proxy signal is "direct://" + newline.
+echo "direct://"
+exit 0

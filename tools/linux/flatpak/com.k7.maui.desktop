@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=K7
+Comment=K7 media client (music, movies, TV shows)
+Exec=k7 %u
+Icon=com.k7.maui
+Terminal=false
+Categories=AudioVideo;Video;Audio;Player;
+MimeType=x-scheme-handler/k7;
+StartupNotify=true
+StartupWMClass=com.k7.maui
+Keywords=media;music;movies;series;

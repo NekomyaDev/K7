@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- AppStream metadata. @VERSION@ and @DATE@ are replaced by tools/linux/build-flatpak.sh. -->
+<component type="desktop-application">
+  <id>com.k7.maui</id>
+  <name>K7</name>
+  <summary>Self-hosted media client for music, movies, and TV shows</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>AGPL-3.0-only</project_license>
+  <developer id="dev.kaybi">
+    <name>K7 contributors</name>
+  </developer>
+  <url type="homepage">https://github.com/kaybi-gh/K7</url>
+  <url type="bugtracker">https://github.com/kaybi-gh/K7/issues</url>
+  <url type="help">https://github.com/kaybi-gh/K7/blob/main/docs/user/guide.md</url>
+  <description>
+    <p>
+      K7 is the native Linux client for a self-hosted K7 media server. Browse libraries,
+      play music and video, and sign in with the k7:// callback used by other native builds.
+    </p>
+  </description>
+  <launchable type="desktop-id">com.k7.maui.desktop</launchable>
+  <categories>
+    <category>AudioVideo</category>
+    <category>Player</category>
+    <category>Video</category>
+    <category>Audio</category>
+  </categories>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="@VERSION@" date="@DATE@" />
+  </releases>
+</component>

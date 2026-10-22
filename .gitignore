@@ -497,6 +497,9 @@ $RECYCLE.BIN/
 # (copied to OutDir by Platforms/Windows/LibVlcWindowsNative.targets). Never commit.
 src/Clients/MAUI/libvlc/
 
+# flatpak-builder default state (build-flatpak.sh uses /tmp instead)
+.flatpak-builder/
+
 # Coding agents
 .github/agents
 /.vscode/tasks.json
