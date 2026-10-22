@@ -2156,44 +2156,57 @@ public partial class BlazorPage
         if (uri is null)
             return;
 
+        // 503 means ffmpeg is still extracting the VTT from the whole file (minutes on a large
+        // remux). Poll on the shared schedule, bounded by elapsed time, and retry transient
+        // network errors the same way: a fixed 40 attempts used to give up silently and left
+        // the selected track off until the user toggled it.
+        var started = System.Diagnostics.Stopwatch.StartNew();
         try
         {
-            const int maxAttempts = 40;
-            for (var attempt = 0; attempt < maxAttempts; attempt++)
+            for (var attempt = 0; ; attempt++)
             {
                 cts.Token.ThrowIfCancellationRequested();
-                using var response = await _k7ServerService.HttpClient.GetAsync(uri, cts.Token);
-
-                if ((int)response.StatusCode == 503)
+                try
                 {
-                    await Task.Delay(1000, cts.Token);
-                    continue;
+                    using var response = await _k7ServerService.HttpClient.GetAsync(uri, cts.Token);
+                    var status = (int)response.StatusCode;
+                    if (response.IsSuccessStatusCode)
+                    {
+                        // VTT ready: enabling the rendition now loads 200 segments.
+                        MainThread.BeginInvokeOnMainThread(() =>
+                        {
+                            if (!ReferenceEquals(_androidSubtitleWarmCts, cts))
+                                return;
+                            NativeVideoDebug.Log("WarmHlsSubtitle ready track=" + trackIndex);
+                            TrySwitchSubtitleTrack(slug, attempt: 0);
+                        });
+                        return;
+                    }
+
+                    if (!SubtitleVttRetryPolicy.IsExtractionInProgress(status))
+                    {
+                        NativeVideoDebug.Log("WarmHlsSubtitle fail status=" + status + " track=" + trackIndex);
+                        return;
+                    }
+                }
+                catch (HttpRequestException ex)
+                {
+                    NativeVideoDebug.Log("WarmHlsSubtitle error " + ex.GetType().Name + " attempt=" + attempt);
                 }
 
-                if (!response.IsSuccessStatusCode)
+                if (SubtitleVttRetryPolicy.ShouldGiveUp(started.Elapsed))
                 {
                     NativeVideoDebug.Log(
-                        "WarmHlsSubtitle fail status=" + (int)response.StatusCode + " track=" + trackIndex);
+                        "WarmHlsSubtitle gave up track=" + trackIndex
+                        + " after " + started.Elapsed.TotalSeconds.ToString("F0") + "s");
                     return;
                 }
 
-                // VTT ready: enabling the rendition now loads 200 segments.
-                MainThread.BeginInvokeOnMainThread(() =>
-                {
-                    if (!ReferenceEquals(_androidSubtitleWarmCts, cts))
-                        return;
-                    NativeVideoDebug.Log("WarmHlsSubtitle ready track=" + trackIndex);
-                    TrySwitchSubtitleTrack(slug, attempt: 0);
-                });
-                return;
+                await Task.Delay(SubtitleVttRetryPolicy.DelayBeforeRetry(attempt), cts.Token);
             }
         }
         catch (OperationCanceledException)
         {
-        }
-        catch (HttpRequestException ex)
-        {
-            NativeVideoDebug.Log("WarmHlsSubtitle error " + ex.GetType().Name);
         }
     }
 

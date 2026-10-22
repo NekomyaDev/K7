@@ -1,4 +1,3 @@
-using System.Net;
 using K7.Clients.MAUI.Playback;
 using K7.Clients.Shared.Helpers;
 using K7.Shared.Dtos;
@@ -88,6 +87,16 @@ public sealed partial class NativeVideoPlayerOverlay
         if (!IsVisible)
             return;
 
+#if LINUX
+        // HLS on Linux is Video.js in WebKitGTK and loadSidecarSubtitleTrack paints the cues
+        // there; a GTK label on top would show every cue twice.
+        if (WindowsVideoPlayback.ShouldUseWebVideoPlayer(_player.Source?.MimeType, _player.Source?.Url))
+        {
+            ClearSidecarSubtitles();
+            return;
+        }
+#endif
+
         var track = _player.SelectedSubtitleTrack;
         var fileId = _player.Source?.IndexedFileId;
         if (track is not { IsTextBased: true } || fileId is null || _server is null)
@@ -128,6 +137,10 @@ public sealed partial class NativeVideoPlayerOverlay
 
     private void UpdateSidecarCue(double timeSeconds)
     {
+#if LINUX
+        if (WindowsVideoPlayback.ShouldUseWebVideoPlayer(_player.Source?.MimeType, _player.Source?.Url))
+            return;
+#endif
         if (IsNextEpisodeVisible || _sidecarCues.Count == 0)
         {
             if (_sidecarShownText is not null)
@@ -228,51 +241,67 @@ public sealed partial class NativeVideoPlayerOverlay
         if (uri is null)
             return;
 
+        // 503 means ffmpeg is still extracting the VTT from the whole file (minutes on a large
+        // remux). Poll on the shared schedule, bounded by elapsed time, and retry transient
+        // network errors the same way: 8 polls used to give up silently and left the selected
+        // track off until the user toggled it.
+        var started = System.Diagnostics.Stopwatch.StartNew();
         try
         {
-            for (var attempt = 0; attempt < 8; attempt++)
+            for (var attempt = 0; ; attempt++)
             {
                 cts.Token.ThrowIfCancellationRequested();
-                using var response = await _server.HttpClient.GetAsync(uri, cts.Token);
-                if (response.StatusCode == HttpStatusCode.ServiceUnavailable)
+                try
                 {
-                    await Task.Delay(1500, cts.Token);
-                    continue;
-                }
+                    using var response = await _server.HttpClient.GetAsync(uri, cts.Token);
+                    if (response.IsSuccessStatusCode)
+                    {
+                        var vtt = await response.Content.ReadAsStringAsync(cts.Token);
+                        if (!ReferenceEquals(_sidecarLoadCts, cts))
+                            return;
 
-                if (!response.IsSuccessStatusCode)
+                        _sidecarCues = WebVttCueParser.Parse(vtt);
+                        VlcPlayerLog.Info(
+                            "sidecar vtt cues=" + _sidecarCues.Count + " track=" + track.Index);
+                        MainThread.BeginInvokeOnMainThread(() =>
+                        {
+                            if (!ReferenceEquals(_sidecarLoadCts, cts))
+                                return;
+                            ApplySidecarSubtitleStyle();
+                            UpdateSidecarCue(_player.CurrentTime);
+                            NotifySidecarTextReady(_sidecarCues.Count > 0);
+                        });
+                        return;
+                    }
+
+                    if (!SubtitleVttRetryPolicy.IsExtractionInProgress((int)response.StatusCode))
+                    {
+                        VlcPlayerLog.Warn(
+                            "sidecar vtt fail status=" + (int)response.StatusCode + " track=" + track.Index);
+                        MainThread.BeginInvokeOnMainThread(() => NotifySidecarTextReady(false));
+                        return;
+                    }
+                }
+                catch (HttpRequestException ex)
                 {
                     VlcPlayerLog.Warn(
-                        "sidecar vtt fail status=" + (int)response.StatusCode + " track=" + track.Index);
+                        "sidecar vtt error " + ex.GetType().Name + " track=" + track.Index + " attempt=" + attempt);
+                }
+
+                if (SubtitleVttRetryPolicy.ShouldGiveUp(started.Elapsed))
+                {
+                    VlcPlayerLog.Warn(
+                        "sidecar vtt gave up track=" + track.Index
+                        + " after " + started.Elapsed.TotalSeconds.ToString("F0") + "s");
                     MainThread.BeginInvokeOnMainThread(() => NotifySidecarTextReady(false));
                     return;
                 }
 
-                var vtt = await response.Content.ReadAsStringAsync(cts.Token);
-                if (!ReferenceEquals(_sidecarLoadCts, cts))
-                    return;
-
-                _sidecarCues = WebVttCueParser.Parse(vtt);
-                VlcPlayerLog.Info(
-                    "sidecar vtt cues=" + _sidecarCues.Count + " track=" + track.Index);
-                MainThread.BeginInvokeOnMainThread(() =>
-                {
-                    if (!ReferenceEquals(_sidecarLoadCts, cts))
-                        return;
-                    ApplySidecarSubtitleStyle();
-                    UpdateSidecarCue(_player.CurrentTime);
-                    NotifySidecarTextReady(_sidecarCues.Count > 0);
-                });
-                return;
+                await Task.Delay(SubtitleVttRetryPolicy.DelayBeforeRetry(attempt), cts.Token);
             }
         }
         catch (OperationCanceledException)
         {
-        }
-        catch (HttpRequestException ex)
-        {
-            VlcPlayerLog.Warn("sidecar vtt fail " + ex.GetType().Name);
-            MainThread.BeginInvokeOnMainThread(() => NotifySidecarTextReady(false));
         }
     }
 #endif
