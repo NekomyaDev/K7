@@ -7,6 +7,8 @@
 # Prerequisites (Ubuntu 24.04+):
 #   sudo apt-get install -y flatpak flatpak-builder
 #   (the script adds the Flathub remote and installs org.gnome.Platform/Sdk//49 for the user)
+# Debuginfo stripping needs elfutils (eu-strip); this script passes --disable-debuginfo
+# because the input is already a Release publish, not sources built inside the Sdk.
 #
 # The publish dir must contain K7.Clients.MAUI (dotnet publish -r linux-x64 --self-contained)
 # and, for Direct Play, libvlc/linux-x64 (tools/linux/bundle-libvlc.sh).
@@ -120,9 +122,13 @@ flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/fl
 flatpak install -y --user "org.gnome.Platform//${RUNTIME_VERSION}" "org.gnome.Sdk//${RUNTIME_VERSION}"
 
 echo "build-flatpak: flatpak-builder -> $OUT"
+# --disable-debuginfo: skip eu-strip / eu-elfcompress. Without it flatpak-builder fails on
+# hosts that lack elfutils (GitHub ubuntu-latest) while compressing native .so files from
+# the publish tree.
 flatpak-builder \
   --user \
   --force-clean \
+  --disable-debuginfo \
   --state-dir="$WORK/state" \
   --repo="$WORK/repo" \
   "$WORK/build" \

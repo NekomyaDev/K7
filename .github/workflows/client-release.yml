@@ -322,7 +322,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             squashfs-tools vlc-plugin-base vlc-plugin-video-output \
-            flatpak flatpak-builder
+            flatpak flatpak-builder elfutils
 
       - name: Bundle libvlc 4
         run: bash tools/linux/bundle-libvlc.sh
