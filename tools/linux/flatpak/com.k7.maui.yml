@@ -31,6 +31,11 @@ finish-args:
 modules:
   - name: k7
     buildsystem: simple
+    # Prebuilt Release tree: skip eu-strip / debuginfo (ubuntu flatpak-builder has no
+    # --disable-debuginfo; without this CI fails with "eu-strip: No such file").
+    build-options:
+      strip: false
+      no-debuginfo: true
     build-commands:
       - install -Dm755 k7-wrapper.sh /app/bin/k7
       # VLC vlc_getProxyUrl spawns `proxy <url>`. Empty = direct (required for libhttps loopback).
