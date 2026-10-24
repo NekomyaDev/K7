@@ -286,6 +286,34 @@ public class GetDiagnosticsSummaryQueryHandlerTests
     }
 
     [Test]
+    public async Task Handle_ShouldNotCountMissingMetadata_ForMusicTracksWithoutGenres()
+    {
+        var libraryId = SeedMusicLibrary();
+        var artistId = Guid.NewGuid();
+        var albumId = Guid.NewGuid();
+        var trackId = Guid.NewGuid();
+
+        _context.Medias.AddRange(
+            new MusicArtist { Id = artistId, Title = "Artist", ReleaseDate = new DateOnly(2000, 1, 1) },
+            new MusicAlbum { Id = albumId, Title = "Album", ArtistId = artistId },
+            new MusicTrack { Id = trackId, Title = "Track", AlbumId = albumId, ArtistId = artistId, TrackNumber = 1 });
+        _context.MediaLibraryAvailabilities.AddRange(
+            new MediaLibraryAvailability { LibraryId = libraryId, MediaId = albumId },
+            new MediaLibraryAvailability { LibraryId = libraryId, MediaId = trackId });
+        _context.ExternalIds.AddRange(
+            new ExternalId { Id = Guid.NewGuid(), ProviderName = "musicbrainz", Value = "album-rg", MediaId = albumId },
+            new ExternalId { Id = Guid.NewGuid(), ProviderName = "musicbrainz", Value = "track-rec", MediaId = trackId });
+        AddMusicFile(libraryId, trackId, "/music/album/01 - Track.flac", 1);
+        await _context.SaveChangesAsync();
+
+        var summaries = await _handler.Handle(new GetDiagnosticsSummaryQuery(), CancellationToken.None);
+        var summary = summaries.Should().ContainSingle().Subject;
+
+        // Album still counts (external id, no genres). Track genres live on the album - not counted.
+        summary.MediaMissingMetadataCount.Should().Be(1);
+    }
+
+    [Test]
     public async Task Handle_ShouldCountArtistsMissingFormationDate_WhenAlbumHasAFile()
     {
         var libraryId = SeedMusicLibrary();

@@ -507,21 +507,6 @@ public class GetDiagnosticItemsQueryHandler : IRequestHandler<GetDiagnosticItems
             .Select(t => new { t.Id, t.AlbumId })
             .ToDictionaryAsync(t => t.Id, cancellationToken);
 
-        var albumIds = trackNavById.Values.Select(t => t.AlbumId).Distinct().ToList();
-        var albumMetadataById = albumIds.Count == 0
-            ? new Dictionary<Guid, AlbumDiagnosticInfo>()
-            : await _context.Medias.OfType<MusicAlbum>()
-                .AsNoTracking()
-                .Where(a => albumIds.Contains(a.Id))
-                .Select(a => new AlbumDiagnosticInfo
-                {
-                    Id = a.Id,
-                    HasExternalIds = a.ExternalIds.Any(),
-                    HasUsableExternalId = a.ExternalIds.Any(e => e.ProviderName.ToLower() != "spotify"),
-                    GenreCount = a.MetadataTags.Count(mt => mt.MetadataTag.Kind == MetadataTagKind.Genre)
-                })
-                .ToDictionaryAsync(a => a.Id, cancellationToken);
-
         var pictureTypes = await _context.MetadataPictures
             .Where(p => p.MediaId != null && mediaIds.Contains(p.MediaId.Value))
             .Select(p => new { Id = p.MediaId!.Value, p.Type })
@@ -566,21 +551,14 @@ public class GetDiagnosticItemsQueryHandler : IRequestHandler<GetDiagnosticItems
 
             var isEnrichableMedia = m.Type is MediaType.Movie or MediaType.Serie or MediaType.MusicAlbum;
             if (!m.HasExternalIds && isEnrichableMedia) issues.Add(DiagnosticIssue.MissingExternalId);
-            // Episodes and seasons do not carry genres. Those live on the serie, and the
-            // metadata editor does not show a genre field for them.
-            if (m.Type is not (MediaType.SerieEpisode or MediaType.SerieSeason or MediaType.MusicArtist)
+            // Episodes, seasons, and music tracks do not carry genres. Those live on the
+            // serie / album, and the metadata editor does not show a genre field for them.
+            if (m.Type is not (MediaType.SerieEpisode or MediaType.SerieSeason
+                    or MediaType.MusicArtist or MediaType.MusicTrack)
                 && m.HasUsableExternalId
                 && m.GenreCount == 0)
             {
                 issues.Add(DiagnosticIssue.MissingMetadata);
-            }
-
-            if (m.IsMusicTrack
-                && trackNavById.TryGetValue(m.Id, out var trackRef)
-                && albumMetadataById.TryGetValue(trackRef.AlbumId, out var albumInfo)
-                && (albumInfo.GenreCount > 0 || albumInfo.HasUsableExternalId))
-            {
-                issues.Remove(DiagnosticIssue.MissingMetadata);
             }
 
             var isRefreshable = m.Type is MediaType.Movie or MediaType.Serie or MediaType.MusicAlbum or MediaType.MusicArtist;
@@ -822,7 +800,10 @@ public class GetDiagnosticItemsQueryHandler : IRequestHandler<GetDiagnosticItems
         if (activeIssues.Contains(DiagnosticIssue.MissingMetadata))
         {
             Add(medias
-                .Where(m => m.Type != MediaType.SerieEpisode && m.Type != MediaType.SerieSeason && m.Type != MediaType.MusicArtist)
+                .Where(m => m.Type != MediaType.SerieEpisode
+                    && m.Type != MediaType.SerieSeason
+                    && m.Type != MediaType.MusicArtist
+                    && m.Type != MediaType.MusicTrack)
                 .Where(m => m.MetadataTags.Count(mt => mt.MetadataTag.Kind == MetadataTagKind.Genre) == 0)
                 .Where(m => m.ExternalIds.Any()
                     || m.Type != MediaType.Movie && m.Type != MediaType.Serie && m.Type != MediaType.MusicAlbum)
@@ -1276,14 +1257,6 @@ public class GetDiagnosticItemsQueryHandler : IRequestHandler<GetDiagnosticItems
         MediaType.MusicAlbum => [MetadataPictureType.Cover],
         _ => []
     };
-
-    private sealed class AlbumDiagnosticInfo
-    {
-        public required Guid Id { get; init; }
-        public required bool HasExternalIds { get; init; }
-        public required bool HasUsableExternalId { get; init; }
-        public required int GenreCount { get; init; }
-    }
 
     private sealed class IndexedFileIssueRow
     {

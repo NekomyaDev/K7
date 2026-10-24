@@ -185,7 +185,8 @@ public class FixDiagnosticItemsCommandHandler(
                 Lane = BackgroundTaskLane.MediaAnalysis,
                 WorkClass = BackgroundTaskWorkClass.Polish,
                 TriggeredBy = BackgroundTaskTriggeredBy.Diagnostics,
-                MaxAttempts = 2
+                MaxAttempts = 2,
+                TimeoutSeconds = MediaAnalysisTimeouts.DetectMediaSegmentsSeconds
             }, cancellationToken);
         }
     }
@@ -210,7 +211,8 @@ public class FixDiagnosticItemsCommandHandler(
             Lane = BackgroundTaskLane.MediaAnalysis,
             WorkClass = BackgroundTaskWorkClass.Polish,
             TriggeredBy = BackgroundTaskTriggeredBy.Diagnostics,
-            MaxAttempts = 2
+            MaxAttempts = 2,
+            TimeoutSeconds = MediaAnalysisTimeouts.DetectMediaSegmentsSeconds
         }, cancellationToken);
     }
 

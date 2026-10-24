@@ -91,7 +91,8 @@ public static class IntroDetectionQueueHelper
             Lane = BackgroundTaskLane.MediaAnalysis,
             WorkClass = BackgroundTaskWorkClass.Polish,
             TriggeredBy = BackgroundTaskTriggeredBy.System,
-            MaxAttempts = 2
+            MaxAttempts = 2,
+            TimeoutSeconds = MediaAnalysisTimeouts.DetectMediaSegmentsSeconds
         }, cancellationToken);
     }
 }

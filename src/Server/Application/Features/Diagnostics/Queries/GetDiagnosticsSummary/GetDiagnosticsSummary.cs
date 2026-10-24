@@ -379,6 +379,7 @@ public class GetDiagnosticsSummaryQueryHandler : IRequestHandler<GetDiagnosticsS
                 && m.Type != MediaType.SerieEpisode
                 && m.Type != MediaType.SerieSeason
                 && m.Type != MediaType.MusicArtist
+                && m.Type != MediaType.MusicTrack
                 && !m.MetadataTags.Any(mt => mt.MetadataTag.Kind == MetadataTagKind.Genre)
             select new { p.LibraryId, p.MediaId }
         )

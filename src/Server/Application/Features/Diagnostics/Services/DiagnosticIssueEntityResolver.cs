@@ -213,7 +213,9 @@ public class DiagnosticIssueEntityResolver(
         var missing = medias
             .Where(m =>
             {
-                if (m.Type is MediaType.SerieEpisode or MediaType.SerieSeason or MediaType.MusicArtist)
+                // Genres live on album/serie/movie - tracks and seasons/episodes are not enrichable here.
+                if (m.Type is MediaType.SerieEpisode or MediaType.SerieSeason
+                    or MediaType.MusicArtist or MediaType.MusicTrack)
                     return false;
 
                 return m.HasUsableExternalId && m.GenreCount == 0;

@@ -62,6 +62,7 @@ public class IntroDetectionQueueHelperTests
         captured!.Request.Should().BeOfType<DetectMediaSegmentsCommand>()
             .Which.SeasonId.Should().Be(_seasonId);
         captured.TargetEntityId.Should().Be(_seasonId);
+        captured.TimeoutSeconds.Should().Be(MediaAnalysisTimeouts.DetectMediaSegmentsSeconds);
     }
 
     [Test]
