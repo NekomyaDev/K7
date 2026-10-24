@@ -162,6 +162,17 @@
     margin: 0;
 }
 
+.select-profile-page ::deep .select-profile-card--expired {
+    opacity: 0.55;
+}
+
+.select-profile-page ::deep .select-profile-card--expired:hover,
+.select-profile-page ::deep .select-profile-card--expired:focus,
+.select-profile-page ::deep .select-profile-card--expired:focus-within,
+.select-profile-page ::deep .select-profile-card--expired:focus-visible {
+    opacity: 0.85;
+}
+
 .select-profile-page ::deep .select-profile-reconnect-badge {
     position: absolute;
     right: 0;
@@ -174,7 +185,7 @@
     height: 1.75rem;
     border-radius: 50%;
     background: var(--color-surface-1);
-    color: var(--color-warning);
+    color: var(--color-error);
     border: 2px solid var(--color-bg);
     box-shadow: var(--shadow-sm);
     pointer-events: none;

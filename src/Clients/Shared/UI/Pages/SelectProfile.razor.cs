@@ -234,6 +234,14 @@ public partial class SelectProfile
         {
             SharedProfileSession.ClearActiveGroup();
 
+            // Already marked expired: open device-link / browser login on purpose.
+            // A just-discovered dead RT stays on this picker so another profile can be chosen.
+            if (NeedsReconnect(user))
+            {
+                await ReconnectExpiredProfileAsync(user);
+                return;
+            }
+
             if (user.HasPin)
             {
                 var pinValid = await PromptPinAsync(user);
@@ -267,13 +275,6 @@ public partial class SelectProfile
 
     private async Task SelectGroupCoreAsync(SharedProfileDto group)
     {
-        if (group.HasPin)
-        {
-            var pinValid = await PromptGroupPinAsync(group);
-            if (!pinValid)
-                return;
-        }
-
         if (string.IsNullOrEmpty(group.HostIdentityUserId))
         {
             Snackbar.Add(L["HostNotOnDevice"], K7Severity.Error);
@@ -285,6 +286,19 @@ public partial class SelectProfile
         {
             Snackbar.Add(L["HostNotOnDevice"], K7Severity.Error);
             return;
+        }
+
+        if (NeedsReconnect(host))
+        {
+            await ReconnectExpiredProfileAsync(host, group);
+            return;
+        }
+
+        if (group.HasPin)
+        {
+            var pinValid = await PromptGroupPinAsync(group);
+            if (!pinValid)
+                return;
         }
 
         // The group PIN is the only lock on this card. The host account PIN applies when
@@ -310,7 +324,16 @@ public partial class SelectProfile
             else
             {
                 Snackbar.Add(string.Format(L["SessionExpired"], host.UserName), K7Severity.Error);
-                await ReconnectExpiredProfileAsync(host, group);
+                // TV: stay on the picker with a reconnect badge. Click again (or +) to link.
+                if (_isTv)
+                {
+                    _users = LocalUserService.GetAll();
+                    ShowCarousel();
+                }
+                else
+                {
+                    await ReconnectExpiredProfileAsync(host, group);
+                }
             }
         }
         catch (HttpRequestException)
@@ -367,8 +390,9 @@ public partial class SelectProfile
             {
                 Snackbar.Add(string.Format(L["SessionExpired"], user.UserName), K7Severity.Error);
                 // Solo auto-login must not start LoginAsync under the spinner (browser wait /
-                // failed callback left an infinite load). Manual picks still reconnect.
-                if (allowInteractiveReconnect)
+                // failed callback left an infinite load). On TV keep the picker so another
+                // profile can be chosen; click the expired card or + to open device-link.
+                if (allowInteractiveReconnect && !_isTv)
                     await ReconnectExpiredProfileAsync(user);
                 else
                 {
@@ -658,6 +682,17 @@ public partial class SelectProfile
 
     private static bool NeedsReconnect(LocalUser user) =>
         string.IsNullOrEmpty(user.RefreshToken);
+
+    private static string GetProfileCardClass(bool needsReconnect, bool isGroup = false)
+    {
+        var classes = isGroup
+            ? "select-profile-card select-profile-card--group focusable my-2"
+            : "select-profile-card focusable my-2";
+
+        return needsReconnect
+            ? $"{classes} select-profile-card--expired"
+            : classes;
+    }
 
     private bool GroupHostNeedsReconnect(SharedProfileDto group)
     {

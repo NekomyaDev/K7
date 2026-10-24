@@ -1,10 +1,18 @@
 .device-activation {
+    position: relative;
     display: flex;
     align-items: center;
     justify-content: center;
     min-height: 100vh;
     min-height: 100dvh;
     padding: var(--space-8);
+}
+
+.device-activation__back {
+    position: absolute;
+    top: var(--space-6);
+    left: var(--space-6);
+    z-index: 1;
 }
 
 .device-activation__card {

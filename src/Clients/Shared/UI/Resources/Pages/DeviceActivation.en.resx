@@ -29,5 +29,6 @@
   <data name="ScanQrCode" xml:space="preserve"><value>Scan the QR code below</value></data>
   <data name="Separator" xml:space="preserve"><value>OR</value></data>
   <data name="ExpiresIn" xml:space="preserve"><value>Expires in {0}</value></data>
+  <data name="BackToProfiles" xml:space="preserve"><value>Choose a user</value></data>
 </root>
 

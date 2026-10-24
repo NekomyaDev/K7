@@ -28,7 +28,7 @@
                 {
                     <CarouselItem @key="@($"user-{user.IdentityUserId}")">
                         <button type="button"
-                                class="select-profile-card focusable my-2"
+                                class="@GetProfileCardClass(NeedsReconnect(user))"
                                 @attributes="GetInitialFocusAttributes(user.IdentityUserId == _initialFocusUserId)"
                                 @onclick="() => SelectUserAsync(user)">
                             <K7Avatar Class="ma-2" Size="xl" Color="primary"
@@ -40,7 +40,7 @@
                                     <span class="select-profile-reconnect-badge"
                                           title="@L["NeedsReconnect"]"
                                           aria-label="@L["NeedsReconnect"]">
-                                        <K7Icon Icon="@Phosphor.ArrowClockwise" IconSize="@K7IconSize.Sm" />
+                                        <K7Icon Icon="@Phosphor.XCircle" IconSize="@K7IconSize.Sm" />
                                     </span>
                                 }
                             </K7Avatar>
@@ -61,7 +61,7 @@
                 {
                     <CarouselItem @key="@($"group-{group.Id}")">
                         <button type="button"
-                                class="select-profile-card select-profile-card--group focusable my-2"
+                                class="@GetProfileCardClass(GroupHostNeedsReconnect(group), isGroup: true)"
                                 @attributes="GetInitialFocusAttributes(group.Id == _initialFocusGroupId)"
                                 @onclick="() => SelectGroupAsync(group)">
                             <div class="select-profile-group-avatars">
@@ -76,7 +76,7 @@
                                             <span class="select-profile-reconnect-badge"
                                                   title="@L["NeedsReconnect"]"
                                                   aria-label="@L["NeedsReconnect"]">
-                                                <K7Icon Icon="@Phosphor.ArrowClockwise" IconSize="@K7IconSize.Sm" />
+                                                <K7Icon Icon="@Phosphor.XCircle" IconSize="@K7IconSize.Sm" />
                                             </span>
                                         }
                                     </K7Avatar>
@@ -91,7 +91,7 @@
                                             <span class="select-profile-reconnect-badge"
                                                   title="@L["NeedsReconnect"]"
                                                   aria-label="@L["NeedsReconnect"]">
-                                                <K7Icon Icon="@Phosphor.ArrowClockwise" IconSize="@K7IconSize.Sm" />
+                                                <K7Icon Icon="@Phosphor.XCircle" IconSize="@K7IconSize.Sm" />
                                             </span>
                                         }
                                     </span>

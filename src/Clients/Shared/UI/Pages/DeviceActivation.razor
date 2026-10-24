@@ -6,9 +6,21 @@
 <PageTitle>@L["PageTitle"]</PageTitle>
 
 <div class="device-activation">
+    @if (_canGoBack)
+    {
+        <K7Button Class="device-activation__back focusable"
+                  Variant="text"
+                  Color="secondary"
+                  StartIcon="@Phosphor.ArrowLeft"
+                  OnClick="GoBackToProfiles"
+                  AriaLabel="@L["BackToProfiles"]">
+            @L["BackToProfiles"]
+        </K7Button>
+    }
+
     <div class="device-activation__card">
-        @if (_loading)
-        {
+    @if (_loading)
+    {
             <K7Icon Name="television"  IconSize="@K7IconSize.Lg" Color="primary" />
             <h1 class="device-activation__title">@L["Title"]</h1>
             <K7Spinner Size="lg" />
