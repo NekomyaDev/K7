@@ -2,9 +2,11 @@ namespace K7.Clients.MAUI.Controls.Video;
 
 /// <summary>
 /// Touch gestures on phone/tablet: left half vertical drag = brightness + dim overlay,
-/// right half = volume + swipe bar, double-tap left/right = skip with ripple. Mirrors the
-/// touch handlers in <c>VideoPlayerControlsOverlay.razor(.cs)</c> (OnTouchStart/Move/End,
-/// brightness-overlay, swipe-indicator).
+/// right half = volume + swipe bar, double-tap left/right = skip with ripple. Catchers are
+/// inset toward the vertical center (and slightly from the side edges) so system shade /
+/// edge / nav gestures are not stolen. Mirrors the touch handlers in
+/// <c>VideoPlayerControlsOverlay.razor(.cs)</c> (OnTouchStart/Move/End, brightness-overlay,
+/// swipe-indicator).
 /// </summary>
 public sealed partial class NativeVideoPlayerOverlay
 {

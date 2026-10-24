@@ -126,7 +126,7 @@ Theme songs play quietly in the background when you open a series or movie page,
 | Vertical drag left half | Brightness |
 | Vertical drag right half | Volume |
 
-Single tap shows or hides controls when you are not mid-gesture.
+Brightness and volume drag zones sit toward the vertical center (and slightly inset from the side edges) so status-bar, edge, and navigation swipes still reach the system. Single tap shows or hides controls when you are not mid-gesture.
 
 ### Keyboard and TV (controls hidden)
 

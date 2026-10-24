@@ -235,6 +235,7 @@ public sealed partial class NativeVideoPlayerOverlay : Grid
         SizeChanged += (_, _) => SyncTvSurfaceComposition();
 #endif
         SizeChanged += (_, _) => UpdateSettingsAvailableHeight();
+        SizeChanged += (_, _) => UpdateGestureCatcherInsets();
         if (NativePointerInput.SupportsHoverRecognizers)
         {
             var pointerMove = new PointerGestureRecognizer();
@@ -1769,6 +1770,7 @@ public sealed partial class NativeVideoPlayerOverlay : Grid
         if (_deviceType == DeviceType.TV)
             _gestureLayer.IsVisible = false;
 
+        UpdateGestureCatcherInsets();
         SyncTvSurfaceComposition();
     }
 
@@ -2825,6 +2827,30 @@ public sealed partial class NativeVideoPlayerOverlay : Grid
 
     private bool IsDesktopLike() => _deviceType is DeviceType.Desktop or DeviceType.Unknown;
     private bool IsPhoneOrTablet() => _deviceType is DeviceType.Phone or DeviceType.Tablet;
+
+    // Keep brightness/volume pans away from system edges (status shade, side/back, gesture nav).
+    private const double PhoneGestureVerticalInsetRatio = 0.22;
+    private const double PhoneGestureHorizontalInset = 36;
+    private const double TabletGestureVerticalInsetRatio = 0.12;
+    private const double TabletGestureHorizontalInset = 24;
+
+    private void UpdateGestureCatcherInsets()
+    {
+        if (!IsPhoneOrTablet() || Height <= 0)
+        {
+            _leftCatcher.Margin = Thickness.Zero;
+            _rightCatcher.Margin = Thickness.Zero;
+            return;
+        }
+
+        var isPhone = _deviceType == DeviceType.Phone;
+        var vRatio = isPhone ? PhoneGestureVerticalInsetRatio : TabletGestureVerticalInsetRatio;
+        var hInset = isPhone ? PhoneGestureHorizontalInset : TabletGestureHorizontalInset;
+        var vInset = Height * vRatio;
+
+        _leftCatcher.Margin = new Thickness(hInset, vInset, 0, vInset);
+        _rightCatcher.Margin = new Thickness(0, vInset, hInset, vInset);
+    }
 
     private void ConfigureGestureCatcher(BoxView catcher, bool panSideLeft)
     {

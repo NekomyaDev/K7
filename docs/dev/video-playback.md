@@ -138,7 +138,9 @@ chrome re-evaluates immediately so AutoSkip and the skip button do not wait on t
 TV D-pad Up from the transport bar focuses skip when it is offered. Down returns to Settings. Skip
 stays in the Left/Right focus ring after Settings. When chrome is hidden, TV Up/Down reveal chrome
 onto skip when it is offered. Enter still skips while the offer is on screen), next-episode countdown/autoplay, and
-touch gestures (brightness/volume swipe with dim overlay, double-tap skip with ripple). Dedicated
+touch gestures (brightness/volume swipe with dim overlay, double-tap skip with ripple). On phone/tablet the
+pan catchers are inset toward the vertical center (and slightly from the sides) so status shade,
+edge, and nav system gestures are not stolen. Dedicated
 TV remote Rewind / Fast-forward keys are intercepted in `MainActivity.DispatchKeyEvent` (they are
 not D-pad events) and skip by the configured SkipBack / SkipForward durations even when chrome is
 visible. Hold scrubs. When playback reaches the end, a series episode with a successor shows
