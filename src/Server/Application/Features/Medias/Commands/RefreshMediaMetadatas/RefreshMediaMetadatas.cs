@@ -841,16 +841,18 @@ public class RefreshMediaMetadatasCommandHandler : IRequestHandler<RefreshMediaM
                 && recordingIdClaimCounts.TryGetValue(existingRecordingId, out var claimants)
                 && claimants > 1;
 
-            // Prefer known recording id from tags when unique. Shared/wrong stamps fall back to
-            // disc+track so studio vs live same titles get distinct MusicBrainz recordings.
+            // Prefer a unique stored recording when its title still matches; otherwise title on
+            // disc, then slot. Shared/wrong stamps (Spotlight carrying 23's id) get corrected.
             var metadataTrack = MusicAlbumTrackMatchHelper.FindMetadataTrackForRecordingStamp(
                 metadata.Tracks,
                 track.DiscNumber,
                 track.TrackNumber,
+                track.Title,
                 existingRecordingId,
                 recordingShared,
                 mt => mt.DiscNumber,
                 mt => mt.TrackNumber,
+                mt => mt.Title,
                 mt => mt.MusicBrainzRecordingId);
 
             if (metadataTrack is null) continue;

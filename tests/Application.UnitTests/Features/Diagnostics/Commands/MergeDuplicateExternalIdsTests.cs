@@ -1,4 +1,5 @@
 using K7.Server.Application.Features.Diagnostics.Commands.MergeDuplicateExternalIds;
+using K7.Server.Application.Features.Medias.Commands.RefreshMediaMetadatas;
 using K7.Server.Application.Helpers;
 using K7.Server.Domain.Entities;
 using K7.Server.Domain.Entities.Medias;
@@ -7,6 +8,7 @@ using K7.Server.Domain.Entities.Users;
 using K7.Server.Domain.Entities.Metadatas.PersonRoles;
 using K7.Server.Domain.Enums;
 using K7.Server.Infrastructure.Database.Context.Data;
+using MediatR;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -19,6 +21,7 @@ public class MergeDuplicateExternalIdsTests
     private SqliteConnection _connection = null!;
     private ApplicationDbContext _context = null!;
     private MergeDuplicateExternalIdsCommandHandler _handler = null!;
+    private ISender _sender = null!;
     private Guid _libraryId;
 
     [SetUp]
@@ -33,8 +36,12 @@ public class MergeDuplicateExternalIdsTests
 
         _context = new ApplicationDbContext(options);
         _context.Database.EnsureCreated();
+        _sender = Substitute.For<ISender>();
+        _sender.Send(Arg.Any<RefreshMediaMetadatasCommand>(), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
         _handler = new MergeDuplicateExternalIdsCommandHandler(
             _context,
+            _sender,
             Substitute.For<ILogger<MergeDuplicateExternalIdsCommandHandler>>());
 
         var groupId = Guid.NewGuid();
@@ -157,6 +164,58 @@ public class MergeDuplicateExternalIdsTests
         merged.Should().Be(1);
         (await _context.Medias.OfType<MusicTrack>().AnyAsync(t => t.Id == duplicate.Id)).Should().BeFalse();
         (await _context.IndexedFiles.SingleAsync(f => f.Id == fileId)).MediaId.Should().Be(kept.Id);
+    }
+
+    [Test]
+    public async Task Handle_ShouldRefreshAlbumBeforeMerging_WhenDuplicateTracksShareAnIsrc()
+    {
+        var album = new MusicAlbum { Id = Guid.NewGuid(), Title = "Shakira." };
+        var kept = new MusicTrack { Id = Guid.NewGuid(), Title = "Song", AlbumId = album.Id, TrackNumber = 1 };
+        var duplicate = new MusicTrack { Id = Guid.NewGuid(), Title = "Song", AlbumId = album.Id, TrackNumber = 1 };
+        _context.Medias.AddRange(album, kept, duplicate);
+        var fileId = AddFile(kept.Id, "/media/music/shakira/song.flac");
+        AddExternalId(album.Id, "musicbrainz", "rg-shakira");
+        AddExternalId(kept.Id, "isrc", "USRC11400411");
+        AddExternalId(duplicate.Id, "isrc", "USRC11400411");
+        await _context.SaveChangesAsync();
+
+        var callOrder = new List<string>();
+        _sender.When(s => s.Send(Arg.Any<RefreshMediaMetadatasCommand>(), Arg.Any<CancellationToken>()))
+            .Do(_ => callOrder.Add("refresh"));
+
+        var merged = await _handler.Handle(new MergeDuplicateExternalIdsCommand(), CancellationToken.None);
+        callOrder.Add("merge-done");
+
+        merged.Should().Be(1);
+        callOrder.Should().Equal("refresh", "merge-done");
+        await _sender.Received(1).Send(
+            Arg.Is<RefreshMediaMetadatasCommand>(c =>
+                c.MediaId == album.Id
+                && c.MetadataProviderExternalId == "rg-shakira"
+                && c.MetadataProviderName == "musicbrainz"),
+            Arg.Any<CancellationToken>());
+        (await _context.Medias.OfType<MusicTrack>().AnyAsync(t => t.Id == duplicate.Id)).Should().BeFalse();
+        (await _context.IndexedFiles.SingleAsync(f => f.Id == fileId)).MediaId.Should().Be(kept.Id);
+    }
+
+    [Test]
+    public async Task Handle_ShouldNotRefreshAlbum_WhenAlbumHasNoMusicBrainzId()
+    {
+        var album = new MusicAlbum { Id = Guid.NewGuid(), Title = "Album" };
+        var kept = new MusicTrack { Id = Guid.NewGuid(), Title = "Song", AlbumId = album.Id, TrackNumber = 1 };
+        var duplicate = new MusicTrack { Id = Guid.NewGuid(), Title = "Song", AlbumId = album.Id, TrackNumber = 1 };
+        _context.Medias.AddRange(album, kept, duplicate);
+        AddFile(kept.Id, "/media/music/song.flac");
+        AddExternalId(kept.Id, "isrc", "USRC17607839");
+        AddExternalId(duplicate.Id, "isrc", "USRC17607839");
+        await _context.SaveChangesAsync();
+
+        var merged = await _handler.Handle(new MergeDuplicateExternalIdsCommand(), CancellationToken.None);
+
+        merged.Should().Be(1);
+        await _sender.DidNotReceive().Send(
+            Arg.Any<RefreshMediaMetadatasCommand>(),
+            Arg.Any<CancellationToken>());
     }
 
     [Test]

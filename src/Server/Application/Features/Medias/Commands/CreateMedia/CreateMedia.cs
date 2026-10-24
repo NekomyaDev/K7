@@ -491,7 +491,10 @@ public class CreateMediaCommandHandler : IRequestHandler<CreateMediaCommand, Gui
                 continue;
             }
 
-            var existingByRecording = await FindExistingTrackByRecordingIdsAsync(tags, cancellationToken);
+            var existingByRecording = await FindExistingTrackByRecordingIdsAsync(
+                tags,
+                trackTitle,
+                cancellationToken);
             if (existingByRecording is not null)
             {
                 AttachFileToExistingTrack(
@@ -654,6 +657,7 @@ public class CreateMediaCommandHandler : IRequestHandler<CreateMediaCommand, Gui
 
     private async Task<MusicTrack?> FindExistingTrackByRecordingIdsAsync(
         AudioTagData? tags,
+        string? trackTitle,
         CancellationToken cancellationToken)
     {
         if (tags is null)
@@ -662,7 +666,8 @@ public class CreateMediaCommandHandler : IRequestHandler<CreateMediaCommand, Gui
         if (!string.IsNullOrWhiteSpace(tags.Isrc))
         {
             var byIsrc = await LoadTrackByExternalIdAsync("isrc", tags.Isrc, cancellationToken);
-            if (byIsrc is not null)
+            if (byIsrc is not null
+                && ImportedMusicShellReattachHelper.TitlesMatch(trackTitle, byIsrc.Title, null, null))
                 return byIsrc;
         }
 
@@ -672,7 +677,8 @@ public class CreateMediaCommandHandler : IRequestHandler<CreateMediaCommand, Gui
                 "musicbrainz",
                 tags.MusicBrainzRecordingId,
                 cancellationToken);
-            if (byRecording is not null)
+            if (byRecording is not null
+                && ImportedMusicShellReattachHelper.TitlesMatch(trackTitle, byRecording.Title, null, null))
                 return byRecording;
         }
 

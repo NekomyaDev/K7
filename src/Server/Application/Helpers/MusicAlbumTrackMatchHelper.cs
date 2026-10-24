@@ -71,23 +71,27 @@ public static class MusicAlbumTrackMatchHelper
 
     /// <summary>
     /// Resolve which metadata row should stamp recording/ISRC ids onto a local track.
-    /// Prefer a recording id that already exists on the track when it appears on the release,
-    /// unless that id is shared by multiple local tracks (likely a prior bad stamp) - then
-    /// the disc+track slot wins so studio/live can be corrected.
+    /// Priority: keep a unique stored recording when its title still matches the local track
+    /// (tags win over a wrong track number); otherwise prefer a unique same-disc title match,
+    /// then a slot whose title matches, then slot/recording fallbacks. A recording id shared by
+    /// multiple local tracks is never kept when a better title or slot match exists.
     /// </summary>
     public static TMeta? FindMetadataTrackForRecordingStamp<TMeta>(
         IEnumerable<TMeta> metadataTracks,
         int? discNumber,
         int? trackNumber,
+        string? localTitle,
         string? existingRecordingId,
         bool existingRecordingIdIsShared,
         Func<TMeta, int?> getDisc,
         Func<TMeta, int?> getTrack,
+        Func<TMeta, string?> getTitle,
         Func<TMeta, string?> getRecordingId)
         where TMeta : class
     {
         var list = metadataTracks as IList<TMeta> ?? metadataTracks.ToList();
         var bySlot = FindMetadataTrackBySlot(list, discNumber, trackNumber, getDisc, getTrack);
+        var byTitle = FindUniqueTitleOnDisc(list, discNumber, localTitle, getDisc, getTitle);
 
         TMeta? byRecording = null;
         if (!string.IsNullOrWhiteSpace(existingRecordingId))
@@ -96,11 +100,59 @@ public static class MusicAlbumTrackMatchHelper
                 string.Equals(getRecordingId(mt), existingRecordingId, StringComparison.OrdinalIgnoreCase));
         }
 
-        if (byRecording is not null && bySlot is not null && !ReferenceEquals(byRecording, bySlot))
-            return existingRecordingIdIsShared ? bySlot : byRecording;
+        var recordingTitleOk = byRecording is not null
+            && TitlesCompatible(localTitle, getTitle(byRecording));
+        var slotTitleOk = bySlot is not null
+            && TitlesCompatible(localTitle, getTitle(bySlot));
+
+        if (existingRecordingIdIsShared)
+        {
+            if (slotTitleOk)
+                return bySlot;
+            if (byTitle is not null)
+                return byTitle;
+            if (bySlot is not null)
+                return bySlot;
+            return recordingTitleOk ? byRecording : byTitle;
+        }
+
+        // Unique stored recording that still names this track: trust it over a wrong slot number.
+        if (recordingTitleOk)
+            return byRecording;
+
+        if (slotTitleOk)
+            return bySlot;
+
+        if (byTitle is not null)
+            return byTitle;
 
         return bySlot ?? byRecording;
     }
+
+    private static TMeta? FindUniqueTitleOnDisc<TMeta>(
+        IEnumerable<TMeta> metadataTracks,
+        int? discNumber,
+        string? title,
+        Func<TMeta, int?> getDisc,
+        Func<TMeta, string?> getTitle)
+        where TMeta : class
+    {
+        if (string.IsNullOrWhiteSpace(title))
+            return null;
+
+        var disc = NormalizeDisc(discNumber);
+        var matches = metadataTracks
+            .Where(mt =>
+                NormalizeDisc(getDisc(mt)) == disc
+                && TitlesCompatible(title, getTitle(mt)))
+            .Take(2)
+            .ToList();
+
+        return matches.Count == 1 ? matches[0] : null;
+    }
+
+    private static bool TitlesCompatible(string? left, string? right) =>
+        ImportedMusicShellReattachHelper.TitlesMatch(left, right, null, null);
 
     /// <summary>
     /// Match a metadata tracklist entry to a local track (same priority as FindOnAlbum).

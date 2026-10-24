@@ -94,7 +94,7 @@ public class MusicAlbumTrackMatchHelperTests
     }
 
     [Test]
-    public void FindMetadataTrackForRecordingStamp_ShouldPreferUniqueRecording_OverWrongSlot()
+    public void FindMetadataTrackForRecordingStamp_ShouldPreferUniqueRecording_OverWrongSlot_WhenTitleMatches()
     {
         var meta = new[]
         {
@@ -106,10 +106,12 @@ public class MusicAlbumTrackMatchHelperTests
             meta,
             discNumber: 1,
             trackNumber: 2,
+            localTitle: "Goodbye Stranger",
             existingRecordingId: "rec-live",
             existingRecordingIdIsShared: false,
             getDisc: m => m.Disc,
             getTrack: m => m.Track,
+            getTitle: m => m.Title,
             getRecordingId: m => m.RecordingId);
 
         hit.Should().NotBeNull();
@@ -117,7 +119,7 @@ public class MusicAlbumTrackMatchHelperTests
     }
 
     [Test]
-    public void FindMetadataTrackForRecordingStamp_ShouldPreferSlot_WhenRecordingIdIsShared()
+    public void FindMetadataTrackForRecordingStamp_ShouldPreferSlot_WhenRecordingIdIsSharedAndTitleMatchesSlot()
     {
         var meta = new[]
         {
@@ -129,14 +131,66 @@ public class MusicAlbumTrackMatchHelperTests
             meta,
             discNumber: 2,
             trackNumber: 2,
+            localTitle: "Goodbye Stranger",
             existingRecordingId: "rec-studio",
             existingRecordingIdIsShared: true,
             getDisc: m => m.Disc,
             getTrack: m => m.Track,
+            getTitle: m => m.Title,
             getRecordingId: m => m.RecordingId);
 
         hit.Should().NotBeNull();
         hit!.RecordingId.Should().Be("rec-live");
+    }
+
+    [Test]
+    public void FindMetadataTrackForRecordingStamp_ShouldPreferTitle_WhenStoredRecordingBelongsToAnotherSong()
+    {
+        var meta = new[]
+        {
+            new Meta(1, 6, "23", "rec-23"),
+            new Meta(1, 10, "Spotlight", "rec-spotlight"),
+        };
+
+        var hit = MusicAlbumTrackMatchHelper.FindMetadataTrackForRecordingStamp(
+            meta,
+            discNumber: 1,
+            trackNumber: 6,
+            localTitle: "Spotlight",
+            existingRecordingId: "rec-23",
+            existingRecordingIdIsShared: true,
+            getDisc: m => m.Disc,
+            getTrack: m => m.Track,
+            getTitle: m => m.Title,
+            getRecordingId: m => m.RecordingId);
+
+        hit.Should().NotBeNull();
+        hit!.RecordingId.Should().Be("rec-spotlight");
+    }
+
+    [Test]
+    public void FindMetadataTrackForRecordingStamp_ShouldPreferTitle_WhenUniqueWrongRecordingAndWrongSlot()
+    {
+        var meta = new[]
+        {
+            new Meta(1, 6, "23", "rec-23"),
+            new Meta(1, 10, "Spotlight", "rec-spotlight"),
+        };
+
+        var hit = MusicAlbumTrackMatchHelper.FindMetadataTrackForRecordingStamp(
+            meta,
+            discNumber: 1,
+            trackNumber: 6,
+            localTitle: "Spotlight",
+            existingRecordingId: "rec-23",
+            existingRecordingIdIsShared: false,
+            getDisc: m => m.Disc,
+            getTrack: m => m.Track,
+            getTitle: m => m.Title,
+            getRecordingId: m => m.RecordingId);
+
+        hit.Should().NotBeNull();
+        hit!.RecordingId.Should().Be("rec-spotlight");
     }
 
     [Test]

@@ -251,6 +251,110 @@ public class CreateMediaMusicIdentityTests
     }
 
     [Test]
+    public async Task Handle_ShouldNotAttachByIsrc_WhenTitlesDiverge()
+    {
+        DisableProviderSearch();
+
+        var artist = new MusicArtist { Title = "Shakira", SortTitle = "Shakira" };
+        var album = new MusicAlbum { Title = "Shakira.", Artist = artist };
+        var twentyThree = new MusicTrack
+        {
+            Title = "23",
+            SortTitle = "23",
+            Album = album,
+            Artist = artist,
+            TrackNumber = 6
+        };
+        twentyThree.ExternalIds.Add(new ExternalId { ProviderName = "isrc", Value = "USRC11400411" });
+        twentyThree.ExternalIds.Add(new ExternalId { ProviderName = "musicbrainz", Value = "rec-23" });
+        _context.Medias.AddRange(artist, album, twentyThree);
+        await _context.SaveChangesAsync();
+        var twentyThreeId = twentyThree.Id;
+        var albumId = album.Id;
+
+        var fileId = Guid.NewGuid();
+        _tagReader.ReadTags(Arg.Any<string>(), Arg.Any<bool>()).Returns(new AudioTagData
+        {
+            Title = "Spotlight",
+            Album = "Shakira.",
+            AlbumArtists = ["Shakira"],
+            Artists = ["Shakira"],
+            TrackNumber = 10,
+            Isrc = "USRC11400411",
+            MusicBrainzRecordingId = "rec-23"
+        });
+        _context.IndexedFiles.Add(CreateIndexedFile(
+            fileId, "Spotlight", "Shakira.", "Shakira", "/music/Shakira/Shakira./10 - Spotlight.flac"));
+        await _context.SaveChangesAsync();
+
+        await _handler.Handle(new CreateMediaCommand
+        {
+            MediaType = MediaType.MusicAlbum,
+            LibraryId = _libraryId,
+            IndexedFileIds = [fileId]
+        }, CancellationToken.None);
+
+        var tracks = await _context.Medias.OfType<MusicTrack>()
+            .Include(t => t.IndexedFiles)
+            .Where(t => t.AlbumId == albumId)
+            .ToListAsync();
+        tracks.Should().HaveCount(2);
+        tracks.Should().Contain(t => t.Id == twentyThreeId && t.IndexedFiles.Count == 0);
+        tracks.Should().Contain(t => t.Title == "Spotlight" && t.IndexedFiles.Any(f => f.Id == fileId));
+    }
+
+    [Test]
+    public async Task Handle_ShouldNotAttachByMusicBrainzRecording_WhenTitlesDiverge()
+    {
+        DisableProviderSearch();
+
+        var artist = new MusicArtist { Title = "Shakira", SortTitle = "Shakira" };
+        var album = new MusicAlbum { Title = "Shakira.", Artist = artist };
+        var twentyThree = new MusicTrack
+        {
+            Title = "23",
+            SortTitle = "23",
+            Album = album,
+            Artist = artist,
+            TrackNumber = 6
+        };
+        twentyThree.ExternalIds.Add(new ExternalId { ProviderName = "musicbrainz", Value = "rec-23" });
+        _context.Medias.AddRange(artist, album, twentyThree);
+        await _context.SaveChangesAsync();
+        var twentyThreeId = twentyThree.Id;
+        var albumId = album.Id;
+
+        var fileId = Guid.NewGuid();
+        _tagReader.ReadTags(Arg.Any<string>(), Arg.Any<bool>()).Returns(new AudioTagData
+        {
+            Title = "Spotlight",
+            Album = "Shakira.",
+            AlbumArtists = ["Shakira"],
+            Artists = ["Shakira"],
+            TrackNumber = 10,
+            MusicBrainzRecordingId = "rec-23"
+        });
+        _context.IndexedFiles.Add(CreateIndexedFile(
+            fileId, "Spotlight", "Shakira.", "Shakira", "/music/Shakira/Shakira./10 - Spotlight.flac"));
+        await _context.SaveChangesAsync();
+
+        await _handler.Handle(new CreateMediaCommand
+        {
+            MediaType = MediaType.MusicAlbum,
+            LibraryId = _libraryId,
+            IndexedFileIds = [fileId]
+        }, CancellationToken.None);
+
+        var tracks = await _context.Medias.OfType<MusicTrack>()
+            .Include(t => t.IndexedFiles)
+            .Where(t => t.AlbumId == albumId)
+            .ToListAsync();
+        tracks.Should().HaveCount(2);
+        tracks.Should().Contain(t => t.Id == twentyThreeId && t.IndexedFiles.Count == 0);
+        tracks.Should().Contain(t => t.Title == "Spotlight" && t.IndexedFiles.Any(f => f.Id == fileId));
+    }
+
+    [Test]
     public async Task Handle_ShouldAttachArtistMbid_WhenExistingArtistMatchedByName()
     {
         var artist = new MusicArtist { Title = "Justin Timberlake", SortTitle = "Justin Timberlake" };
