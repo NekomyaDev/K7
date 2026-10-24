@@ -110,6 +110,41 @@ public class DuplicateMediaDiagnosticsTests
     }
 
     [Test]
+    public async Task Handle_ShouldNotReportDuplicateExternalId_WhenSameAlbumIsrcHasDistinctMusicBrainzRecordings()
+    {
+        var albumId = AddAlbum("The Velvet Underground");
+        var closet = AddTrack("After Hours", albumId);
+        var valentin = AddTrack("After Hours", albumId);
+        AddExternalId(closet, "isrc", "USPR16900001");
+        AddExternalId(valentin, "isrc", "USPR16900001");
+        AddExternalId(closet, "musicbrainz", "recording-closet");
+        AddExternalId(valentin, "musicbrainz", "recording-valentin");
+        await _context.SaveChangesAsync();
+
+        var items = await QueryItemsAsync(DiagnosticIssue.DuplicateExternalId);
+
+        items.Should().BeEmpty();
+    }
+
+    [Test]
+    public async Task Handle_ShouldReportDuplicateExternalId_WhenSameAlbumIsrcSharesMusicBrainzRecording()
+    {
+        var albumId = AddAlbum("The Velvet Underground");
+        var first = AddTrack("After Hours", albumId);
+        var second = AddTrack("After Hours (copy)", albumId);
+        AddExternalId(first, "isrc", "USPR16900001");
+        AddExternalId(second, "isrc", "USPR16900001");
+        AddExternalId(first, "musicbrainz", "recording-same");
+        AddExternalId(second, "musicbrainz", "recording-same");
+        await _context.SaveChangesAsync();
+
+        var items = await QueryItemsAsync(DiagnosticIssue.DuplicateExternalId);
+
+        items.Should().HaveCount(2);
+        items.Select(i => i.EntityId).Should().BeEquivalentTo([first, second]);
+    }
+
+    [Test]
     public async Task Handle_ShouldReportDuplicateExternalId_WhenArtistsShareMusicBrainzId()
     {
         var first = AddArtist("Artist");

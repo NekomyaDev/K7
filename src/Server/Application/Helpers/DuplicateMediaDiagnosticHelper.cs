@@ -22,7 +22,8 @@ namespace K7.Server.Application.Helpers;
 ///   the most reliable signal. A local media and its federated copy can legitimately carry the
 ///   same provider id, so only medias with the same PeerServerId are compared. The same
 ///   recording on different albums (isrc or musicbrainz) is intentional and is not flagged.
-///   Two copies on the same album still are.
+///   Two copies on the same album still are, except a shared isrc when each track already has a
+///   distinct musicbrainz recording id (same title twice on one release, e.g. After Hours mixes).
 /// - SuspectedDuplicateMedia: identity depends on the type, always inside one library.
 ///   Movies and series share a normalized title (trim + case-insensitive) and release year.
 ///   Albums that have a file also share the artist name, so two Greatest Hits from different artists
@@ -255,10 +256,20 @@ public static class DuplicateMediaDiagnosticHelper
             .Select(t => new { t.Id, t.AlbumId })
             .ToDictionaryAsync(t => t.Id, t => t.AlbumId, cancellationToken);
 
+        var musicBrainzByTrack = await LoadTrackMusicBrainzRecordingIdsAsync(
+            context,
+            albumByTrack.Keys.ToList(),
+            cancellationToken);
+
         var groups = new List<DuplicateExternalIdGroup>();
         foreach (var (key, mediaIds) in grouped)
         {
             var kept = ExcludeWantedCrossAlbumRecordings(key.ProviderName, mediaIds, albumByTrack);
+            kept = ExcludeIsrcWithDistinctMusicBrainzRecordings(
+                key.ProviderName,
+                kept,
+                albumByTrack,
+                musicBrainzByTrack);
             if (kept.Count <= 1)
                 continue;
 
@@ -285,6 +296,69 @@ public static class DuplicateMediaDiagnosticHelper
             return mediaIds;
 
         return byAlbum.Where(g => g.Count() > 1).SelectMany(g => g).ToList();
+    }
+
+    /// <summary>
+    /// Same-album tracks can share an ISRC in MusicBrainz or tags while still being distinct
+    /// recordings (Closet Mix vs Val Valentin, etc.). When each track already has its own
+    /// musicbrainz recording id, the shared ISRC alone is not a duplicate signal.
+    /// </summary>
+    private static List<Guid> ExcludeIsrcWithDistinctMusicBrainzRecordings(
+        string providerName,
+        List<Guid> mediaIds,
+        Dictionary<Guid, Guid> albumByTrack,
+        IReadOnlyDictionary<Guid, string> musicBrainzByTrack)
+    {
+        if (!providerName.Equals("isrc", StringComparison.OrdinalIgnoreCase)
+            || mediaIds.Count <= 1
+            || !mediaIds.All(albumByTrack.ContainsKey))
+            return mediaIds;
+
+        var kept = new List<Guid>();
+        foreach (var albumGroup in mediaIds.GroupBy(id => albumByTrack[id]))
+        {
+            var ids = albumGroup.ToList();
+            var withRecording = ids
+                .Where(id => musicBrainzByTrack.ContainsKey(id))
+                .ToList();
+            var withoutRecording = ids.Except(withRecording).ToList();
+
+            foreach (var recordingGroup in withRecording.GroupBy(
+                         id => musicBrainzByTrack[id],
+                         StringComparer.OrdinalIgnoreCase))
+            {
+                if (recordingGroup.Count() > 1)
+                    kept.AddRange(recordingGroup);
+            }
+
+            if (withoutRecording.Count > 1)
+                kept.AddRange(withoutRecording);
+        }
+
+        return kept;
+    }
+
+    private static async Task<Dictionary<Guid, string>> LoadTrackMusicBrainzRecordingIdsAsync(
+        IApplicationDbContext context,
+        IReadOnlyCollection<Guid> trackIds,
+        CancellationToken cancellationToken)
+    {
+        if (trackIds.Count == 0)
+            return [];
+
+        var rows = await context.ExternalIds
+            .AsNoTracking()
+            .Where(e => e.MediaId != null
+                && trackIds.Contains(e.MediaId.Value)
+                && e.ProviderName == "musicbrainz"
+                && e.Value != null
+                && e.Value != "")
+            .Select(e => new { MediaId = e.MediaId!.Value, e.Value })
+            .ToListAsync(cancellationToken);
+
+        return rows
+            .GroupBy(r => r.MediaId)
+            .ToDictionary(g => g.Key, g => g.First().Value!);
     }
 
     private static bool IsRecordingProvider(string providerName) =>

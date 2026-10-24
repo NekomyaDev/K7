@@ -160,6 +160,27 @@ public class MergeDuplicateExternalIdsTests
     }
 
     [Test]
+    public async Task Handle_ShouldNotMergeSameAlbumTracks_WhenSharedIsrcHasDistinctMusicBrainzRecordings()
+    {
+        var album = new MusicAlbum { Id = Guid.NewGuid(), Title = "The Velvet Underground" };
+        var closet = new MusicTrack { Id = Guid.NewGuid(), Title = "After Hours", AlbumId = album.Id, TrackNumber = 10 };
+        var valentin = new MusicTrack { Id = Guid.NewGuid(), Title = "After Hours", AlbumId = album.Id, TrackNumber = 20 };
+        _context.Medias.AddRange(album, closet, valentin);
+        AddFile(closet.Id, "/media/music/after-hours-closet.flac");
+        AddFile(valentin.Id, "/media/music/after-hours-valentin.flac");
+        AddExternalId(closet.Id, "isrc", "USPR16900001");
+        AddExternalId(valentin.Id, "isrc", "USPR16900001");
+        AddExternalId(closet.Id, "musicbrainz", "recording-closet");
+        AddExternalId(valentin.Id, "musicbrainz", "recording-valentin");
+        await _context.SaveChangesAsync();
+
+        var merged = await _handler.Handle(new MergeDuplicateExternalIdsCommand(), CancellationToken.None);
+
+        merged.Should().Be(0);
+        (await _context.Medias.OfType<MusicTrack>().CountAsync()).Should().Be(2);
+    }
+
+    [Test]
     public async Task Handle_ShouldMergeMatchingTracks_AndKeepUnmatchedOnSourceAlbum()
     {
         var kept = new MusicAlbum { Id = Guid.NewGuid(), Title = "Album" };
