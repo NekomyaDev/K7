@@ -291,7 +291,11 @@ public class GetHlsStreamManifestQueryHandlerTests
         var playlist = ((TextHttpContentResult)result).Content;
         playlist.Should().Contain("TranscodingAudioCodec=aac");
         playlist.Should().Contain("CODECS=\"avc1.");
-        playlist.Should().NotContain("ec-3");
+        // Scope to CODECS: a random StreamSessionId can substring-match "ec-3" (e.g. ...aaec-3...).
+        var codecsAttr = playlist.Split('\n')
+            .Select(line => line.Trim())
+            .First(line => line.Contains("CODECS=", StringComparison.Ordinal));
+        codecsAttr.Should().NotContain("ec-3");
     }
 
     [Test]

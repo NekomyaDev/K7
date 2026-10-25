@@ -3,7 +3,7 @@ using System.Numerics;
 namespace K7.Server.Application.Helpers;
 
 /// <summary>
-/// Pairwise chromaprint matching (intro-skipper style): inverted index, contiguous runs,
+/// Pairwise chromaprint matching: inverted index, contiguous runs,
 /// and bridging of neighbouring runs so noisy openings still form one intro.
 /// </summary>
 public static class ChromaprintFingerprintMatcher
