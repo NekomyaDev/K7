@@ -89,6 +89,7 @@
   <data name="FixQueued" xml:space="preserve"><value>Fix queued as background task.</value></data>
   <data name="BulkFixQueued" xml:space="preserve"><value>{0} fix(es) queued as background tasks.</value></data>
   <data name="DetailMissingPictures" xml:space="preserve"><value>Missing: {0}</value></data>
+  <data name="DetailMissingIntroOutro" xml:space="preserve"><value>Missing: {0}</value></data>
   <data name="DetailStaleRefreshed" xml:space="preserve"><value>Last refreshed: {0} (threshold: {1} days)</value></data>
   <data name="DetailNeverRefreshed" xml:space="preserve"><value>Never refreshed</value></data>
   <data name="AcrossLibraries" xml:space="preserve"><value>{0} libraries</value></data>

@@ -48,6 +48,7 @@
     border-left: 1px solid var(--color-border);
 }
 
+.diagnostics-issues-cell__detail,
 .diagnostics-issues-cell__applies {
     display: block;
     line-height: 1.2;

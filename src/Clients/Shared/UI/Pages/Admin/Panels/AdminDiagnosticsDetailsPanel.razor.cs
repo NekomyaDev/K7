@@ -810,6 +810,8 @@ public partial class AdminDiagnosticsDetailsPanel : IDisposable
     {
         DiagnosticIssue.MissingPictures when item.MissingPictureTypes is { Count: > 0 }
             => string.Format(L["DetailMissingPictures"], string.Join(", ", item.MissingPictureTypes)),
+        DiagnosticIssue.MissingIntroOutro when item.MissingIntroOutroTypes is { Count: > 0 }
+            => string.Format(L["DetailMissingIntroOutro"], string.Join(", ", item.MissingIntroOutroTypes)),
         DiagnosticIssue.StaleMetadata when item.LastMetadataRefreshedAt is not null
             => string.Format(L["DetailStaleRefreshed"],
                 item.LastMetadataRefreshedAt.Value.LocalDateTime.ToString("d"),
@@ -818,6 +820,15 @@ public partial class AdminDiagnosticsDetailsPanel : IDisposable
         DiagnosticIssue.InaccessiblePath when item.DetailText is not null => item.DetailText,
         _ => GetIssueLabel(issue)
     };
+
+    /// <summary>
+    /// Caption under the issue label when detail adds info beyond the label itself.
+    /// </summary>
+    private string? GetIssueDetailCaption(DiagnosticItemDto item, DiagnosticIssue issue)
+    {
+        var detail = GetIssueDetail(item, issue);
+        return detail == GetIssueLabel(issue) ? null : detail;
+    }
 
     private string GetIssueLabel(DiagnosticIssue issue) => issue switch
     {

@@ -14122,6 +14122,15 @@
               "type": "string"
             }
           },
+          "missingIntroOutroTypes": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
           "lastMetadataRefreshedAt": {
             "type": [
               "null",

@@ -525,9 +525,9 @@ public class GetDiagnosticItemsQueryHandler : IRequestHandler<GetDiagnosticItems
         var episodeIds = medias.Where(m => m.Type == MediaType.SerieEpisode).Select(m => m.Id).ToList();
         // Match summary counts (verifyOnDisk: false). Season eligibility still expands to full
         // seasons when episodeIds is a page slice so Virtualize pages are not emptied.
-        var missingIntroOutroEpisodeIds = episodeIds.Count == 0
-            ? new HashSet<Guid>()
-            : await IntroOutroDiagnosticHelper.GetMissingIntroOutroEpisodeIdsAsync(
+        var missingIntroOutroTypesByEpisode = episodeIds.Count == 0
+            ? new Dictionary<Guid, IReadOnlyList<string>>()
+            : await IntroOutroDiagnosticHelper.GetMissingIntroOutroTypesByEpisodeAsync(
                 _context,
                 request.LibraryId,
                 episodeIds,
@@ -577,7 +577,8 @@ public class GetDiagnosticItemsQueryHandler : IRequestHandler<GetDiagnosticItems
             if (m.Type == MediaType.Serie && missingThemeSerieIds.Contains(m.Id))
                 issues.Add(DiagnosticIssue.MissingThemeSong);
 
-            if (m.Type == MediaType.SerieEpisode && missingIntroOutroEpisodeIds.Contains(m.Id))
+            missingIntroOutroTypesByEpisode.TryGetValue(m.Id, out var missingIntroOutroTypes);
+            if (m.Type == MediaType.SerieEpisode && missingIntroOutroTypes is { Count: > 0 })
                 issues.Add(DiagnosticIssue.MissingIntroOutro);
 
             if (duplicateExternalIdMediaIds.Contains(m.Id))
@@ -613,6 +614,9 @@ public class GetDiagnosticItemsQueryHandler : IRequestHandler<GetDiagnosticItems
                     trackNav?.AlbumId),
                 MissingPictureTypes = missingPictures.Count > 0
                     ? missingPictures.Select(p => p.ToString()).ToList()
+                    : null,
+                MissingIntroOutroTypes = missingIntroOutroTypes is { Count: > 0 }
+                    ? missingIntroOutroTypes
                     : null,
                 LastMetadataRefreshedAt = m.LastMetadataRefreshedAt,
                 MetadataRefreshIntervalDays = threshold

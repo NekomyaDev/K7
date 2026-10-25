@@ -7,7 +7,11 @@ namespace K7.Server.Application.Helpers;
 
 public static class IntroOutroDiagnosticHelper
 {
-    public sealed record EpisodeIntroOutroCandidate(Guid EpisodeId, Guid SeasonId, Guid LibraryId);
+    public sealed record EpisodeIntroOutroCandidate(
+        Guid EpisodeId,
+        Guid SeasonId,
+        Guid LibraryId,
+        IReadOnlyList<string> MissingTypes);
 
     /// <summary>
     /// Episodes in intro-detection-enabled libraries whose season is detection-eligible
@@ -104,21 +108,24 @@ public static class IntroOutroDiagnosticHelper
 
         var typesByEpisode = segmentRows
             .GroupBy(s => s.MediaId)
-            .ToDictionary(g => g.Key, g => g.Select(x => x.Type).ToHashSet());
+            .ToDictionary(g => g.Key, g => (IReadOnlyCollection<MediaSegmentType>)g.Select(x => x.Type).ToHashSet());
 
         var candidates = existing
             .Where(r => eligibleSeasonIds.Contains(r.SeasonId))
             .GroupBy(r => r.EpisodeId)
             .Select(g => g.First())
-            .Where(r =>
+            .Select(r =>
             {
-                if (!typesByEpisode.TryGetValue(r.EpisodeId, out var types))
-                    return true;
-
-                return !types.Contains(MediaSegmentType.Intro)
-                    || !types.Contains(MediaSegmentType.Outro);
+                var present = typesByEpisode.GetValueOrDefault(r.EpisodeId, []);
+                var missing = IntroOutroSegmentCompleteness.GetMissingTypeNames(present);
+                return (Row: r, Missing: missing);
             })
-            .Select(r => new EpisodeIntroOutroCandidate(r.EpisodeId, r.SeasonId, r.LibraryId))
+            .Where(x => x.Missing.Count > 0)
+            .Select(x => new EpisodeIntroOutroCandidate(
+                x.Row.EpisodeId,
+                x.Row.SeasonId,
+                x.Row.LibraryId,
+                x.Missing))
             .ToList();
 
         if (limitSet is not null)
@@ -137,6 +144,18 @@ public static class IntroOutroDiagnosticHelper
         var candidates = await GetMissingIntroOutroEpisodesAsync(
             context, libraryId, limitToEpisodeIds, verifyOnDisk, cancellationToken);
         return candidates.Select(c => c.EpisodeId).ToHashSet();
+    }
+
+    public static async Task<Dictionary<Guid, IReadOnlyList<string>>> GetMissingIntroOutroTypesByEpisodeAsync(
+        IApplicationDbContext context,
+        Guid? libraryId,
+        IReadOnlyCollection<Guid>? limitToEpisodeIds = null,
+        bool verifyOnDisk = true,
+        CancellationToken cancellationToken = default)
+    {
+        var candidates = await GetMissingIntroOutroEpisodesAsync(
+            context, libraryId, limitToEpisodeIds, verifyOnDisk, cancellationToken);
+        return candidates.ToDictionary(c => c.EpisodeId, c => c.MissingTypes);
     }
 
     public static async Task<Dictionary<Guid, int>> GetMissingIntroOutroCountsByLibraryAsync(

@@ -89,6 +89,7 @@
   <data name="FixQueued" xml:space="preserve"><value>Correction lancée en tâche de fond.</value></data>
   <data name="BulkFixQueued" xml:space="preserve"><value>{0} correction(s) lancée(s) en tâche de fond.</value></data>
   <data name="DetailMissingPictures" xml:space="preserve"><value>Manquant : {0}</value></data>
+  <data name="DetailMissingIntroOutro" xml:space="preserve"><value>Manquant : {0}</value></data>
   <data name="DetailStaleRefreshed" xml:space="preserve"><value>Dernier rafraîchissement : {0} (seuil : {1} jours)</value></data>
   <data name="DetailNeverRefreshed" xml:space="preserve"><value>Jamais rafraîchi</value></data>
   <data name="AcrossLibraries" xml:space="preserve"><value>{0} bibliothèques</value></data>

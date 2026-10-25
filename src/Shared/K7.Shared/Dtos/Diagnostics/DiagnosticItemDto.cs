@@ -18,6 +18,8 @@ public sealed record DiagnosticItemDto
     public MediaType? MediaType { get; init; }
     public MediaIdentificationDto? Identification { get; init; }
     public IReadOnlyList<string>? MissingPictureTypes { get; init; }
+    /// <summary>When <see cref="DiagnosticIssue.MissingIntroOutro"/> is set: "Intro" and/or "Outro".</summary>
+    public IReadOnlyList<string>? MissingIntroOutroTypes { get; init; }
     public DateTimeOffset? LastMetadataRefreshedAt { get; init; }
     public int? MetadataRefreshIntervalDays { get; init; }
 }

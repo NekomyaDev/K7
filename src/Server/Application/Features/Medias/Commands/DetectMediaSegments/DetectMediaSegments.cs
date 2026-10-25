@@ -295,29 +295,47 @@ public class DetectMediaSegmentsCommandHandler : IRequestHandler<DetectMediaSegm
     private async Task<List<MediaSegment>> RunIncrementalDetectionAsync(List<SerieEpisode> episodes, CancellationToken cancellationToken)
     {
         var segments = new List<MediaSegment>();
-        var withSegments = episodes.Where(e => e.Segments.Count > 0).ToList();
-        var withoutSegments = episodes.Where(e => e.Segments.Count == 0).ToList();
+        var incomplete = episodes
+            .Where(e => IntroOutroSegmentCompleteness.IsIncomplete(
+                e.Segments.Select(s => s.Type).ToHashSet()))
+            .ToList();
 
-        if (withoutSegments.Count == 0)
+        if (incomplete.Count == 0)
             return segments;
 
-        var referenceData = await ExtractAllFingerprintsAsync(withSegments, cancellationToken);
-        var newData = await ExtractAllFingerprintsAsync(withoutSegments, cancellationToken);
-
-        if (referenceData.Count == 0 || newData.Count == 0)
+        // Fingerprints for the whole season: incomplete targets match against every other episode
+        // (including outro-only peers), so a missing Intro can still be retried after Outro exists.
+        var allData = await ExtractAllFingerprintsAsync(episodes, cancellationToken);
+        if (allData.Count < 2)
             return segments;
 
-        foreach (var newEp in newData)
+        var incompleteIds = incomplete.Select(e => e.Id).ToHashSet();
+        var presentTypesByEpisode = incomplete.ToDictionary(
+            e => e.Id,
+            e => (IReadOnlyCollection<MediaSegmentType>)e.Segments.Select(s => s.Type).ToHashSet());
+
+        foreach (var target in allData.Where(d => incompleteIds.Contains(d.Episode.Id)))
         {
-            var introSegment = await TryDetectSegmentFromReferencesAsync(
-                newEp, referenceData, MediaSegmentType.Intro, cancellationToken);
-            if (introSegment is not null)
-                segments.Add(introSegment);
+            var present = presentTypesByEpisode[target.Episode.Id];
+            var references = allData.Where(d => d.Episode.Id != target.Episode.Id).ToList();
+            if (references.Count == 0)
+                continue;
 
-            var outroSegment = await TryDetectSegmentFromReferencesAsync(
-                newEp, referenceData, MediaSegmentType.Outro, cancellationToken);
-            if (outroSegment is not null)
-                segments.Add(outroSegment);
+            if (IntroOutroSegmentCompleteness.NeedsType(present, MediaSegmentType.Intro))
+            {
+                var introSegment = await TryDetectSegmentFromReferencesAsync(
+                    target, references, MediaSegmentType.Intro, cancellationToken);
+                if (introSegment is not null)
+                    segments.Add(introSegment);
+            }
+
+            if (IntroOutroSegmentCompleteness.NeedsType(present, MediaSegmentType.Outro))
+            {
+                var outroSegment = await TryDetectSegmentFromReferencesAsync(
+                    target, references, MediaSegmentType.Outro, cancellationToken);
+                if (outroSegment is not null)
+                    segments.Add(outroSegment);
+            }
         }
 
         return segments;

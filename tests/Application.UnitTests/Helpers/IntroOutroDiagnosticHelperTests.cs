@@ -80,6 +80,89 @@ public class IntroOutroDiagnosticHelperTests
         limited.Should().ContainSingle().Which.Should().Be(episode1);
     }
 
+    [Test]
+    public async Task GetMissingIntroOutroEpisodes_ShouldReportIntroOnly_WhenOutroExists()
+    {
+        var libraryId = SeedSerieLibrary();
+        var (_, _, episode1, episode2) = SeedTwoEpisodes();
+
+        AddProbedEpisodeFile(libraryId, episode1, "/nonexistent/media/serie/s01/e01.mkv");
+        AddProbedEpisodeFile(libraryId, episode2, "/nonexistent/media/serie/s01/e02.mkv");
+        _context.MediaSegments.Add(new MediaSegment
+        {
+            Id = Guid.NewGuid(),
+            MediaId = episode1,
+            Type = MediaSegmentType.Outro,
+            StartMs = 100_000,
+            EndMs = 130_000,
+            DetectedAt = DateTimeOffset.UtcNow
+        });
+        await _context.SaveChangesAsync();
+
+        var candidates = await IntroOutroDiagnosticHelper.GetMissingIntroOutroEpisodesAsync(
+            _context, libraryId, verifyOnDisk: false, cancellationToken: CancellationToken.None);
+
+        var e1 = candidates.Should().ContainSingle(c => c.EpisodeId == episode1).Subject;
+        e1.MissingTypes.Should().Equal(IntroOutroSegmentCompleteness.IntroTypeName);
+
+        var e2 = candidates.Should().ContainSingle(c => c.EpisodeId == episode2).Subject;
+        e2.MissingTypes.Should().Equal(
+            IntroOutroSegmentCompleteness.IntroTypeName,
+            IntroOutroSegmentCompleteness.OutroTypeName);
+    }
+
+    [Test]
+    public async Task GetMissingIntroOutroEpisodes_ShouldReportBoth_WhenNoSegments()
+    {
+        var libraryId = SeedSerieLibrary();
+        var (_, _, episode1, episode2) = SeedTwoEpisodes();
+
+        AddProbedEpisodeFile(libraryId, episode1, "/nonexistent/media/serie/s01/e01.mkv");
+        AddProbedEpisodeFile(libraryId, episode2, "/nonexistent/media/serie/s01/e02.mkv");
+        await _context.SaveChangesAsync();
+
+        var candidates = await IntroOutroDiagnosticHelper.GetMissingIntroOutroEpisodesAsync(
+            _context, libraryId, verifyOnDisk: false, cancellationToken: CancellationToken.None);
+
+        candidates.Should().HaveCount(2);
+        foreach (var candidate in candidates)
+        {
+            candidate.MissingTypes.Should().Equal(
+                IntroOutroSegmentCompleteness.IntroTypeName,
+                IntroOutroSegmentCompleteness.OutroTypeName);
+        }
+    }
+
+    private (Guid SerieId, Guid SeasonId, Guid Episode1, Guid Episode2) SeedTwoEpisodes()
+    {
+        var serieId = Guid.NewGuid();
+        var seasonId = Guid.NewGuid();
+        var episode1 = Guid.NewGuid();
+        var episode2 = Guid.NewGuid();
+
+        _context.Medias.AddRange(
+            new Serie { Id = serieId, Title = "Serie" },
+            new SerieSeason { Id = seasonId, SerieId = serieId, SeasonNumber = 1, Title = "S1" },
+            new SerieEpisode
+            {
+                Id = episode1,
+                SerieId = serieId,
+                SeasonId = seasonId,
+                EpisodeNumber = 1,
+                Title = "E1"
+            },
+            new SerieEpisode
+            {
+                Id = episode2,
+                SerieId = serieId,
+                SeasonId = seasonId,
+                EpisodeNumber = 2,
+                Title = "E2"
+            });
+
+        return (serieId, seasonId, episode1, episode2);
+    }
+
     private Guid SeedSerieLibrary()
     {
         var groupId = Guid.NewGuid();

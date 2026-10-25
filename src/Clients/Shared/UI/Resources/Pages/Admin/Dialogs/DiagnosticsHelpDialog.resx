@@ -47,7 +47,7 @@
   <data name="Def_MissingHlsSegments" xml:space="preserve"><value>Les segments HLS (keyframes) pour le transmux n'ont pas encore ete calcules pour ce fichier.</value></data>
   <data name="Def_MissingChapters" xml:space="preserve"><value>Les chapitres embarques du fichier n'ont pas ete extraits alors que l'extraction est activee sur la bibliotheque.</value></data>
   <data name="Def_MissingThemeSong" xml:space="preserve"><value>Serie eligibile a la generation de theme musical sans fichier theme disponible (sidecar ou extrait).</value></data>
-  <data name="Def_MissingIntroOutro" xml:space="preserve"><value>Episode eligible a la detection auquel il manque un segment Intro et/ou Outro (y compris outro seule). Verrouiller IntroOutro sur la serie pour masquer.</value></data>
+  <data name="Def_MissingIntroOutro" xml:space="preserve"><value>Episode eligible a la detection auquel il manque un segment Intro et/ou Outro (y compris outro seule). La liste precise le segment manquant. Verrouiller IntroOutro sur la serie pour masquer.</value></data>
   <data name="Def_MissingAudioAnalysis" xml:space="preserve"><value>Analyse audio (AudioMuse) absente pour un morceau musical.</value></data>
 
   <data name="Bulk_OrphanFile" xml:space="preserve"><value>Relance la creation de media (RetryCreateMedia) pour rattacher les fichiers identifies. Les non identifies restent a re-identifier manuellement.</value></data>

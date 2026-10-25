@@ -162,6 +162,12 @@
                                             <span class="text-sm" style="color: var(--color-@(GetIssueColor(context, issue)));">
                                                 @GetIssueLabel(issue)
                                             </span>
+                                            @if (GetIssueDetailCaption(context, issue) is { } detailCaption)
+                                            {
+                                                <span class="text-caption diagnostics-issues-cell__detail" style="color: var(--color-text-muted);">
+                                                    @detailCaption
+                                                </span>
+                                            }
                                             <span class="text-caption diagnostics-issues-cell__applies" style="color: var(--color-text-muted);">
                                                 @GetAppliesToLabel(issue)
                                             </span>
