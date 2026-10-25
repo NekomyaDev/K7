@@ -4303,6 +4303,18 @@ K7.replaceUrlHash = function (hash) {
     history.replaceState(null, '', window.location.pathname + window.location.search + normalized);
 };
 
+// Capture-phase: stamp #ep-N on the season URL before the browser follows an
+// episode link. Touch often skips focusin, so Back would otherwise remount the
+// season list at scrollTop 0.
+document.addEventListener('click', function (e) {
+    if (e.defaultPrevented) return;
+    if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+    var el = e.target && e.target.closest && e.target.closest('[data-episode-anchor]');
+    if (!el) return;
+    var hash = el.getAttribute('data-episode-anchor');
+    if (hash) K7.replaceUrlHash(hash);
+}, true);
+
 K7._isTvUi = function () {
     return document.documentElement.classList.contains('platform-tv')
         || window.__k7TvNativeRemote === true;

@@ -61,6 +61,7 @@ public partial class SerieSeason : IAsyncDisposable
     private CancellationTokenSource? _castLoadCts;
     private DebouncedActionRunner? _progressRefreshRunner;
     private bool _refreshSeasonOnPlayerHide;
+    private int? _restoreEpisodeNumberAfterPlayerHide;
     // Wait until episode focus settles. Applying cast on every D-pad step rebuilds the
     // below carousel and stalls Embla episode navigation.
     private const int CastUpdateDebounceMs = 400;
@@ -127,6 +128,7 @@ public partial class SerieSeason : IAsyncDisposable
     {
         _loading = true;
         _focusEpisodeFragment = null;
+        _restoreEpisodeNumberAfterPlayerHide = null;
         _focusedEpisodeDisplayableCast = [];
         _castLoadEpisodeId = null;
         _seasonTvScrollInitialized = false;
@@ -504,6 +506,9 @@ public partial class SerieSeason : IAsyncDisposable
             return;
         }
 
+        // Stamp #ep-N so Back from the episode page remounts the season on this row.
+        SyncEpisodeAnchorInUrl(episode.EpisodeNumber);
+
         var episodeMedia = await k7ServerService.GetMediaAsync(episode.Id, bypassCache: true);
         if (episodeMedia is not SerieEpisodeDto episodeDto) return;
 
@@ -537,6 +542,8 @@ public partial class SerieSeason : IAsyncDisposable
                 Guid.Parse(SerieId),
                 indexedFile.Id);
             _refreshSeasonOnPlayerHide = true;
+            // Phone WebView often resets the season list to the top when the native player closes.
+            _restoreEpisodeNumberAfterPlayerHide = episode.EpisodeNumber;
 
             var episodeTitle = VideoPlayerTitleHelper.FormatEpisode(episodeDto);
             var coverUrl = GetEpisodeStillUrl(episode, MetadataPictureSize.Small);
@@ -579,6 +586,7 @@ public partial class SerieSeason : IAsyncDisposable
             await FeatureAccess.HasCapabilityAsync(Capability.CanReportPlaybackProgress),
             Guid.Parse(SerieId));
         _refreshSeasonOnPlayerHide = true;
+        _restoreEpisodeNumberAfterPlayerHide = episode.EpisodeNumber;
 
         var epTitle = VideoPlayerTitleHelper.FormatEpisode(episodeDto);
         var cover = GetEpisodeStillUrl(episode, MetadataPictureSize.Small);
@@ -761,6 +769,12 @@ public partial class SerieSeason : IAsyncDisposable
                         ApplyTvHeroVisuals(_focusedEpisode);
                     }
                 }
+            }
+
+            if (!_isTv && _restoreEpisodeNumberAfterPlayerHide is int restoreNum)
+            {
+                _restoreEpisodeNumberAfterPlayerHide = null;
+                _focusEpisodeFragment = $"#ep-{restoreNum}";
             }
 
             StateHasChanged();

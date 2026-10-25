@@ -219,11 +219,14 @@ public partial class EpisodeListItem : IDisposable
 
     private void OnLinkFocusIn(FocusEventArgs e) => SyncEpisodeAnchorInUrl();
 
-    private void SyncEpisodeAnchorInUrl()
+    private void SyncEpisodeAnchorInUrl() =>
+        SyncEpisodeAnchorInUrlAsync().FireAndForget(Logger);
+
+    private async Task SyncEpisodeAnchorInUrlAsync()
     {
         try
         {
-            _ = JS.InvokeVoidAsync("K7.replaceUrlHash", $"ep-{Episode.EpisodeNumber}");
+            await JS.InvokeVoidAsync("K7.replaceUrlHash", $"ep-{Episode.EpisodeNumber}");
         }
         catch (Exception ex) when (ex is JSDisconnectedException or InvalidOperationException or JSException)
         {
@@ -265,7 +268,7 @@ public partial class EpisodeListItem : IDisposable
         WaitForLongPressAsync(_longPressCts.Token, fromKeyboard: true).FireAndForget(Logger);
     }
 
-    private void OnKeyUp(KeyboardEventArgs e)
+    private async Task OnKeyUp(KeyboardEventArgs e)
     {
         if (!IsEnterKey(e))
             return;
@@ -282,7 +285,10 @@ public partial class EpisodeListItem : IDisposable
         }
 
         if (wasShortPress && !string.IsNullOrEmpty(Href))
+        {
+            await SyncEpisodeAnchorInUrlAsync();
             NavigationManager.NavigateTo(Href);
+        }
     }
 
     private void OnTouchStart(TouchEventArgs e)

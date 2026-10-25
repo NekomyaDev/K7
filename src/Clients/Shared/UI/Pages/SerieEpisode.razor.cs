@@ -457,7 +457,8 @@ public partial class SerieEpisode : IAsyncDisposable
 
     private void NavigateToSerie() => NavigationManager.NavigateTo($"/series/{SerieId}");
 
-    private void NavigateToSeason() => NavigationManager.NavigateTo($"/series/{SerieId}/seasons/{SeasonNumber}");
+    private void NavigateToSeason() =>
+        NavigationManager.NavigateTo($"/series/{SerieId}/seasons/{SeasonNumber}#ep-{EpisodeNumber}");
 
     private Task OpenOverviewDialogAsync()
     {

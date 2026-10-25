@@ -15,6 +15,7 @@
      @oncontextmenu:preventDefault="true">
     <a class="episode-card-link focusable"
        href="@Href"
+       data-episode-anchor="ep-@Episode.EpisodeNumber"
        @onclick="OnLinkClick"
        @onclick:preventDefault="@ShouldPreventLinkActivation"
        @onfocusin="OnLinkFocusIn"
