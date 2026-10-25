@@ -37,7 +37,7 @@
                                     @GetRemediationExplanation(issue)
                                 </p>
                                 <div class="diagnostics-help__issue-actions">
-                                    <K7Button Size="sm" Variant="text" Color="primary" OnClick="@(() => NavigateToIssue(issue))">
+                                    <K7Button Size="sm" Variant="text" Color="primary" Href="@BuildIssueHref(issue)">
                                         @L["ViewIssue"]
                                     </K7Button>
                                 </div>

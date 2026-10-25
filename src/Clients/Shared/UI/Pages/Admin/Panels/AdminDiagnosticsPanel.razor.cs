@@ -121,6 +121,13 @@ public partial class AdminDiagnosticsPanel : IDisposable
             .ToList();
     }
 
+    private IEnumerable<(string Severity, string Label, int Count)> GetSeverityStats() =>
+    [
+        ("error", L["SeverityErrors"], _errorCount),
+        ("warning", L["SeverityWarnings"], _warningCount),
+        ("info", L["SeverityInfo"], _infoCount)
+    ];
+
     private static string StatValueClass(int count, string severity) =>
         count == 0
             ? "diagnostics-dashboard__stat-value--ok"

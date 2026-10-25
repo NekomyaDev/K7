@@ -26,15 +26,13 @@ public partial class DiagnosticsHelpDialog
     private static IReadOnlyList<DiagnosticIssue> IssuesForWorkClass(DiagnosticWorkClass workClass) =>
         DiagnosticIssueTaxonomy.IssuesForWorkClass(workClass);
 
-    private void NavigateToIssue(DiagnosticIssue issue)
+    private string BuildIssueHref(DiagnosticIssue issue)
     {
         var parameters = new Dictionary<string, object?>
         {
             ["issue"] = DiagnosticIssueTaxonomy.Canonicalize(issue).ToString()
         };
-        var href = Navigation.GetUriWithQueryParameters("/admin/diagnostics/details", parameters);
-        Dialog.Close();
-        Navigation.NavigateTo(href);
+        return Navigation.GetUriWithQueryParameters("/admin/diagnostics/details", parameters);
     }
 
     private string GetIssueLabel(DiagnosticIssue issue) => issue switch

@@ -27,30 +27,29 @@
     {
         <section class="diagnostics-dashboard__section" aria-label="@L["FilterSeverity"]">
             <div class="diagnostics-dashboard__stat-grid">
-                <button type="button" class="diagnostics-dashboard__stat-link focusable"
-                        disabled="@(_errorCount == 0)"
-                        @onclick="@(() => NavigateToDetails(severity: "error"))">
-                    <K7Paper Outlined="true" Class="diagnostics-dashboard__stat-card">
-                        <span class="text-overline">@L["SeverityErrors"]</span>
-                        <h3 class="diagnostics-dashboard__stat-value @StatValueClass(_errorCount, "error")">@_errorCount</h3>
-                    </K7Paper>
-                </button>
-                <button type="button" class="diagnostics-dashboard__stat-link focusable"
-                        disabled="@(_warningCount == 0)"
-                        @onclick="@(() => NavigateToDetails(severity: "warning"))">
-                    <K7Paper Outlined="true" Class="diagnostics-dashboard__stat-card">
-                        <span class="text-overline">@L["SeverityWarnings"]</span>
-                        <h3 class="diagnostics-dashboard__stat-value @StatValueClass(_warningCount, "warning")">@_warningCount</h3>
-                    </K7Paper>
-                </button>
-                <button type="button" class="diagnostics-dashboard__stat-link focusable"
-                        disabled="@(_infoCount == 0)"
-                        @onclick="@(() => NavigateToDetails(severity: "info"))">
-                    <K7Paper Outlined="true" Class="diagnostics-dashboard__stat-card">
-                        <span class="text-overline">@L["SeverityInfo"]</span>
-                        <h3 class="diagnostics-dashboard__stat-value @StatValueClass(_infoCount, "info")">@_infoCount</h3>
-                    </K7Paper>
-                </button>
+                @foreach (var (severity, label, count) in GetSeverityStats())
+                {
+                    @if (count == 0)
+                    {
+                        <span class="diagnostics-dashboard__stat-link diagnostics-dashboard__stat-link--disabled"
+                              aria-disabled="true">
+                            <K7Paper Outlined="true" Class="diagnostics-dashboard__stat-card">
+                                <span class="text-overline">@label</span>
+                                <h3 class="diagnostics-dashboard__stat-value @StatValueClass(count, severity)">@count</h3>
+                            </K7Paper>
+                        </span>
+                    }
+                    else
+                    {
+                        <a href="@BuildDetailsHref(severity: severity)"
+                           class="diagnostics-dashboard__stat-link focusable">
+                            <K7Paper Outlined="true" Class="diagnostics-dashboard__stat-card">
+                                <span class="text-overline">@label</span>
+                                <h3 class="diagnostics-dashboard__stat-value @StatValueClass(count, severity)">@count</h3>
+                            </K7Paper>
+                        </a>
+                    }
+                }
             </div>
             @if (_totalIssueCount > 0)
             {
@@ -82,20 +81,18 @@
                 <section class="diagnostics-dashboard__section" aria-label="@GetWorkClassLabel(workClass)">
                     <div class="diagnostics-dashboard__section-heading">
                         <h6 class="diagnostics-dashboard__section-title">@GetWorkClassLabel(workClass)</h6>
-                        <button type="button"
-                                class="diagnostics-dashboard__see-all focusable"
-                                @onclick="@(() => NavigateToDetails(workClass: workClass))">
+                        <a href="@BuildDetailsHref(workClass: workClass)"
+                           class="diagnostics-dashboard__see-all focusable">
                             @string.Format(L["WorkClassSeeAll"], workClassCount)
-                        </button>
+                        </a>
                     </div>
                     <div class="diagnostics-dashboard__issue-grid">
                         @foreach (var (issue, count) in issues)
                         {
                             var canFix = DiagnosticIssueTaxonomy.SupportsBulkFix(issue);
                             <K7Paper Outlined="true" Class="diagnostics-dashboard__issue-card">
-                                <button type="button"
-                                        class="diagnostics-dashboard__issue-card-body focusable"
-                                        @onclick="@(() => NavigateToDetails(issue: issue))">
+                                <a href="@BuildDetailsHref(issue: issue)"
+                                   class="diagnostics-dashboard__issue-card-body focusable">
                                     <div class="diagnostics-dashboard__issue-card-main">
                                         <span class="text-sm diagnostics-dashboard__issue-label"
                                               style="@(GetIssueLabelStyle(issue))">
@@ -103,7 +100,7 @@
                                         </span>
                                         <span class="diagnostics-dashboard__issue-count">@count</span>
                                     </div>
-                                </button>
+                                </a>
                                 <div class="diagnostics-dashboard__issue-card-footer">
                                     <span class="text-caption diagnostics-dashboard__stat-caption">
                                         @GetIssueCardCaption(issue)
@@ -146,37 +143,40 @@
                             var errors = LibraryHealthSummaryCounts.SumErrors([library]);
                             var warnings = LibraryHealthSummaryCounts.SumWarnings([library]);
                             var infos = LibraryHealthSummaryCounts.SumInfo([library]);
+                            var libraryHref = BuildDetailsHref(libraryId: libraryId);
                         }
                         <td>
-                            <span class="text-sm diagnostics-dashboard__library-title">@library.LibraryTitle</span>
+                            <a href="@libraryHref"
+                               class="text-sm diagnostics-dashboard__library-title focusable"
+                               @onclick:stopPropagation="true">
+                                @library.LibraryTitle
+                            </a>
                         </td>
-                        <td class="diagnostics-dashboard__library-col-kpi">
-                            <button type="button"
-                                    class="diagnostics-dashboard__library-kpi @(errors > 0 ? "focusable" : null)"
-                                    disabled="@(errors == 0)"
-                                    @onclick="@(() => NavigateToDetails(severity: "error", libraryId: libraryId))"
-                                    @onclick:stopPropagation="true">
-                                <span class="diagnostics-dashboard__library-kpi-value @(errors == 0 ? "diagnostics-dashboard__library-kpi-value--ok" : "diagnostics-dashboard__library-kpi-value--error")">@errors</span>
-                            </button>
-                        </td>
-                        <td class="diagnostics-dashboard__library-col-kpi">
-                            <button type="button"
-                                    class="diagnostics-dashboard__library-kpi @(warnings > 0 ? "focusable" : null)"
-                                    disabled="@(warnings == 0)"
-                                    @onclick="@(() => NavigateToDetails(severity: "warning", libraryId: libraryId))"
-                                    @onclick:stopPropagation="true">
-                                <span class="diagnostics-dashboard__library-kpi-value @(warnings == 0 ? "diagnostics-dashboard__library-kpi-value--ok" : "diagnostics-dashboard__library-kpi-value--warning")">@warnings</span>
-                            </button>
-                        </td>
-                        <td class="diagnostics-dashboard__library-col-kpi">
-                            <button type="button"
-                                    class="diagnostics-dashboard__library-kpi @(infos > 0 ? "focusable" : null)"
-                                    disabled="@(infos == 0)"
-                                    @onclick="@(() => NavigateToDetails(severity: "info", libraryId: libraryId))"
-                                    @onclick:stopPropagation="true">
-                                <span class="diagnostics-dashboard__library-kpi-value @(infos == 0 ? "diagnostics-dashboard__library-kpi-value--ok" : "diagnostics-dashboard__library-kpi-value--info")">@infos</span>
-                            </button>
-                        </td>
+                        @foreach (var (severity, count) in new (string, int)[]
+                                  {
+                                      ("error", errors),
+                                      ("warning", warnings),
+                                      ("info", infos)
+                                  })
+                        {
+                            <td class="diagnostics-dashboard__library-col-kpi">
+                                @if (count == 0)
+                                {
+                                    <span class="diagnostics-dashboard__library-kpi diagnostics-dashboard__library-kpi--disabled"
+                                          aria-disabled="true">
+                                        <span class="diagnostics-dashboard__library-kpi-value diagnostics-dashboard__library-kpi-value--ok">@count</span>
+                                    </span>
+                                }
+                                else
+                                {
+                                    <a href="@BuildDetailsHref(severity: severity, libraryId: libraryId)"
+                                       class="diagnostics-dashboard__library-kpi focusable"
+                                       @onclick:stopPropagation="true">
+                                        <span class="diagnostics-dashboard__library-kpi-value diagnostics-dashboard__library-kpi-value--@severity">@count</span>
+                                    </a>
+                                }
+                            </td>
+                        }
                     </RowTemplate>
                 </K7Table>
             </section>
