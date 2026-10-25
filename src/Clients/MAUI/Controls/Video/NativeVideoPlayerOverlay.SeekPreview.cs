@@ -10,19 +10,26 @@ namespace K7.Clients.MAUI.Controls.Video;
 /// </summary>
 public sealed partial class NativeVideoPlayerOverlay
 {
+    /// <summary>TV/desktop DPAD scrub: coalesce encodes so remotes do not thrash CPU.</summary>
+    private const int TvCropDebounceMs = 90;
+
     private readonly Border _seekPreview = new();
     private readonly Border _seekPreviewImageBorder = new();
     private readonly Image _seekPreviewImage = new();
     private readonly Label _seekPreviewTime = new();
     private readonly Label _seekPreviewChapterTitle = new();
+    private readonly object _spriteLock = new();
 
     private SKBitmap? _spriteBitmap;
     private string? _spriteLoadedUrl;
     private string? _spriteLoadingUrl;
     private Task? _spriteLoadTask;
+    private int _spriteLoadGeneration;
     private int _lastSpriteIndex = -1;
     private int _cropVersion;
     private CancellationTokenSource? _cropDebounceCts;
+    private (string Url, double Time, int SpriteIndex)? _phonePendingCrop;
+    private int _phoneCropLoopRunning;
 
     private void BuildSeekPreview()
     {
@@ -83,6 +90,7 @@ public sealed partial class NativeVideoPlayerOverlay
         {
             _seekPreview.IsVisible = false;
             _seekPreview.Opacity = 0;
+            _phonePendingCrop = null;
             _cropDebounceCts?.Cancel();
             return;
         }
@@ -94,14 +102,13 @@ public sealed partial class NativeVideoPlayerOverlay
         _seekPreviewChapterTitle.IsVisible = !string.IsNullOrEmpty(chapterTitle);
         _seekPreviewChapterTitle.Text = chapterTitle ?? string.Empty;
 
-        // Keep invisible until SizeChanged positions it above the thumb.
         _seekPreview.IsVisible = true;
         PositionSeekPreview(time);
-        if (_seekPreview.Width > 1 && _seekPreview.Height > 1)
+        // Phone finger scrub: do not wait for SizeChanged or the HUD stays a black slab.
+        if (IsPhoneOrTablet() || (_seekPreview.Width > 1 && _seekPreview.Height > 1))
             _seekPreview.Opacity = 1;
 
-        var relativeUrl = _player.Source?.ThumbnailsUrl;
-        var url = _server?.GetAbsoluteUri(relativeUrl)?.AbsoluteUri ?? relativeUrl;
+        var url = ResolveSeekThumbnailsUrl(_player.Source?.ThumbnailsUrl);
         if (string.IsNullOrEmpty(url))
         {
             _seekPreviewImageBorder.IsVisible = false;
@@ -162,6 +169,17 @@ public sealed partial class NativeVideoPlayerOverlay
 
     private void ScheduleSpriteCrop(string url, double time, int spriteIndex)
     {
+        // Finger drag cancels a fixed debounce forever (new move before 90ms). Phone uses
+        // latest-wins coalesce instead. TV/desktop keep the debounce - DPAD is sparse and
+        // that path is already smooth.
+        if (IsPhoneOrTablet())
+        {
+            _phonePendingCrop = (url, time, spriteIndex);
+            if (Interlocked.CompareExchange(ref _phoneCropLoopRunning, 1, 0) == 0)
+                _ = RunPhoneCropLoopAsync();
+            return;
+        }
+
         _cropDebounceCts?.Cancel();
         _cropDebounceCts?.Dispose();
         _cropDebounceCts = new CancellationTokenSource();
@@ -172,12 +190,12 @@ public sealed partial class NativeVideoPlayerOverlay
         {
             try
             {
-                await Task.Delay(90, token);
-                await EnsureSpriteBitmapAsync(url);
-                if (token.IsCancellationRequested || version != _cropVersion || _spriteBitmap is null)
+                await Task.Delay(TvCropDebounceMs, token).ConfigureAwait(false);
+                await EnsureSpriteBitmapAsync(url).ConfigureAwait(false);
+                if (token.IsCancellationRequested || version != _cropVersion)
                     return;
 
-                ApplySpriteCrop(time, spriteIndex, version);
+                ApplySpriteCrop(time, spriteIndex, version, halfResolution: false);
             }
             catch (OperationCanceledException)
             {
@@ -190,64 +208,161 @@ public sealed partial class NativeVideoPlayerOverlay
         }, token);
     }
 
-    private void ApplySpriteCrop(double time, int spriteIndex, int version)
+    private async Task RunPhoneCropLoopAsync()
     {
-        if (_spriteBitmap is null || version != _cropVersion)
+        try
+        {
+            while (true)
+            {
+                var pending = _phonePendingCrop;
+                if (pending is null)
+                    break;
+                _phonePendingCrop = null;
+
+                var version = Interlocked.Increment(ref _cropVersion);
+                try
+                {
+                    await EnsureSpriteBitmapAsync(pending.Value.Url).ConfigureAwait(false);
+                    if (version != _cropVersion)
+                        continue;
+
+                    // Half-res encode: less Glide work under continuous touch moves.
+                    ApplySpriteCrop(
+                        pending.Value.Time,
+                        pending.Value.SpriteIndex,
+                        version,
+                        halfResolution: true);
+                }
+                catch (Exception ex)
+                {
+                    NativeVideoDebug.Log("SeekThumb fail: " + ex.GetType().Name);
+                }
+            }
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _phoneCropLoopRunning, 0);
+            // A scrub may have landed after the null check and before we cleared the flag.
+            if (_phonePendingCrop is not null
+                && Interlocked.CompareExchange(ref _phoneCropLoopRunning, 1, 0) == 0)
+                _ = RunPhoneCropLoopAsync();
+        }
+    }
+
+    private void ApplySpriteCrop(double time, int spriteIndex, int version, bool halfResolution)
+    {
+        if (version != _cropVersion)
+            return;
+
+        SKBitmap? sheet;
+        lock (_spriteLock)
+            sheet = _spriteBitmap;
+        if (sheet is null)
             return;
 
         var (col, row) = NativeSeekThumbnailHelper.GetSpriteCell(time);
         var srcX = col * NativeSeekThumbnailHelper.ThumbWidth;
         var srcY = row * NativeSeekThumbnailHelper.ThumbHeight;
-        if (srcX + NativeSeekThumbnailHelper.ThumbWidth > _spriteBitmap.Width
-            || srcY + NativeSeekThumbnailHelper.ThumbHeight > _spriteBitmap.Height)
+        if (srcX + NativeSeekThumbnailHelper.ThumbWidth > sheet.Width
+            || srcY + NativeSeekThumbnailHelper.ThumbHeight > sheet.Height)
         {
-            MainThread.BeginInvokeOnMainThread(() => _seekPreviewImageBorder.IsVisible = false);
+            // Keep the last good frame; only hide when nothing has painted yet.
+            if (_seekPreviewImage.Source is null)
+                MainThread.BeginInvokeOnMainThread(() => _seekPreviewImageBorder.IsVisible = false);
             return;
         }
 
-        using var subset = new SKBitmap(
-            NativeSeekThumbnailHelper.ThumbWidth,
-            NativeSeekThumbnailHelper.ThumbHeight);
-        if (!_spriteBitmap.ExtractSubset(
-                subset,
-                new SKRectI(
-                    srcX,
-                    srcY,
-                    srcX + NativeSeekThumbnailHelper.ThumbWidth,
-                    srcY + NativeSeekThumbnailHelper.ThumbHeight)))
+        SKBitmap? subset = null;
+        lock (_spriteLock)
         {
-            MainThread.BeginInvokeOnMainThread(() => _seekPreviewImageBorder.IsVisible = false);
-            return;
+            if (!ReferenceEquals(_spriteBitmap, sheet) || version != _cropVersion)
+                return;
+
+            subset = new SKBitmap(
+                NativeSeekThumbnailHelper.ThumbWidth,
+                NativeSeekThumbnailHelper.ThumbHeight);
+            if (!sheet.ExtractSubset(
+                    subset,
+                    new SKRectI(
+                        srcX,
+                        srcY,
+                        srcX + NativeSeekThumbnailHelper.ThumbWidth,
+                        srcY + NativeSeekThumbnailHelper.ThumbHeight)))
+            {
+                subset.Dispose();
+                if (_seekPreviewImage.Source is null)
+                    MainThread.BeginInvokeOnMainThread(() => _seekPreviewImageBorder.IsVisible = false);
+                return;
+            }
         }
 
-        using var image = SKImage.FromBitmap(subset);
-        using var data = image.Encode(SKEncodedImageFormat.Jpeg, 75);
-        var bytes = data.ToArray();
+        // Encode outside the sprite lock so TV dispose/warm is not blocked by JPEG work.
+        byte[]? bytes = null;
+        try
+        {
+            SKBitmap encodeSource = subset;
+            SKBitmap? scaled = null;
+            try
+            {
+                if (halfResolution)
+                {
+                    scaled = subset.Resize(
+                        new SKImageInfo(
+                            NativeSeekThumbnailHelper.ThumbWidth / 2,
+                            NativeSeekThumbnailHelper.ThumbHeight / 2),
+                        new SKSamplingOptions(SKFilterMode.Linear));
+                    if (scaled is not null)
+                        encodeSource = scaled;
+                }
+
+                using var image = SKImage.FromBitmap(encodeSource);
+                // Phone: slightly lower quality for faster encode under finger scrub.
+                var quality = halfResolution ? 55 : 75;
+                using var data = image.Encode(SKEncodedImageFormat.Jpeg, quality);
+                bytes = data.ToArray();
+            }
+            finally
+            {
+                scaled?.Dispose();
+            }
+        }
+        finally
+        {
+            subset.Dispose();
+        }
+
+        if (bytes is null || version != _cropVersion)
+            return;
 
         MainThread.BeginInvokeOnMainThread(() =>
         {
             if (version != _cropVersion)
                 return;
             _lastSpriteIndex = spriteIndex;
-            _seekPreviewImage.Source = ImageSource.FromStream(() => new MemoryStream(bytes));
+            var copy = bytes;
+            _seekPreviewImage.Source = ImageSource.FromStream(() => new MemoryStream(copy));
             _seekPreviewImageBorder.IsVisible = true;
         });
     }
 
     private Task EnsureSpriteBitmapAsync(string url)
     {
-        if (_spriteLoadedUrl == url && _spriteBitmap is not null)
-            return Task.CompletedTask;
+        lock (_spriteLock)
+        {
+            if (_spriteLoadedUrl == url && _spriteBitmap is not null)
+                return Task.CompletedTask;
+        }
 
         if (_spriteLoadingUrl == url && _spriteLoadTask is not null)
             return _spriteLoadTask;
 
+        var generation = Interlocked.Increment(ref _spriteLoadGeneration);
         _spriteLoadingUrl = url;
-        _spriteLoadTask = LoadSpriteBitmapCoreAsync(url);
+        _spriteLoadTask = LoadSpriteBitmapCoreAsync(url, generation);
         return _spriteLoadTask;
     }
 
-    private async Task LoadSpriteBitmapCoreAsync(string url)
+    private async Task LoadSpriteBitmapCoreAsync(string url, int generation)
     {
         HttpClient? client = null;
         var ownsClient = false;
@@ -261,26 +376,39 @@ public sealed partial class NativeVideoPlayerOverlay
 
         try
         {
-            using var response = await client.GetAsync(url);
+            using var response = await client.GetAsync(url).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
-            await using var stream = await response.Content.ReadAsStreamAsync();
+            await using var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
             using var managed = new SKManagedStream(stream);
             var bitmap = SKBitmap.Decode(managed)
                 ?? throw new InvalidOperationException("sprite decode failed");
 
-            MainThread.BeginInvokeOnMainThread(() =>
+            // Await so callers of EnsureSpriteBitmapAsync see _spriteBitmap before continuing
+            // (BeginInvoke raced scrub crops and left a black HUD until the next settle).
+            await MainThread.InvokeOnMainThreadAsync(() =>
             {
-                DisposeSpriteBitmap();
-                _spriteBitmap = bitmap;
-                _spriteLoadedUrl = url;
+                if (generation != _spriteLoadGeneration)
+                {
+                    bitmap.Dispose();
+                    return;
+                }
+
+                lock (_spriteLock)
+                {
+                    DisposeSpriteBitmapUnlocked();
+                    _spriteBitmap = bitmap;
+                    _spriteLoadedUrl = url;
+                }
+
                 _spriteLoadingUrl = null;
                 NativeVideoDebug.Log(
                     "SeekThumb sheet loaded w=" + bitmap.Width + " h=" + bitmap.Height);
-            });
+            }).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            _spriteLoadingUrl = null;
+            if (generation == _spriteLoadGeneration)
+                _spriteLoadingUrl = null;
             NativeVideoDebug.Log("SeekThumb load fail: " + ex.GetType().Name);
             throw;
         }
@@ -288,12 +416,26 @@ public sealed partial class NativeVideoPlayerOverlay
         {
             if (ownsClient)
                 client.Dispose();
-            if (_spriteLoadingUrl == url)
+            if (generation == _spriteLoadGeneration && _spriteLoadingUrl == url)
                 _spriteLoadingUrl = null;
         }
     }
 
+    private void InvalidateSpriteLoad()
+    {
+        Interlocked.Increment(ref _spriteLoadGeneration);
+        _spriteLoadingUrl = null;
+        _spriteLoadTask = null;
+        _phonePendingCrop = null;
+    }
+
     private void DisposeSpriteBitmap()
+    {
+        lock (_spriteLock)
+            DisposeSpriteBitmapUnlocked();
+    }
+
+    private void DisposeSpriteBitmapUnlocked()
     {
         _spriteBitmap?.Dispose();
         _spriteBitmap = null;
@@ -301,12 +443,27 @@ public sealed partial class NativeVideoPlayerOverlay
         _lastSpriteIndex = -1;
     }
 
+    private string? ResolveSeekThumbnailsUrl(string? relativeUrl) =>
+        _server?.GetAbsoluteUri(relativeUrl)?.AbsoluteUri ?? relativeUrl;
+
     private void WarmSeekThumbnails()
     {
-        var relativeUrl = _player.Source?.ThumbnailsUrl;
-        var url = _server?.GetAbsoluteUri(relativeUrl)?.AbsoluteUri ?? relativeUrl;
+        // Mirrors Blazor SeekBar.EnsureThumbnailsPreloadedAsync: start the sprite download
+        // as soon as ThumbnailsUrl is known, not on the first scrub.
+        var url = ResolveSeekThumbnailsUrl(_player.Source?.ThumbnailsUrl);
         if (string.IsNullOrEmpty(url))
+        {
+            NativeVideoDebug.Log("SeekThumb warm skip (no url)");
             return;
+        }
+
+        lock (_spriteLock)
+        {
+            if (_spriteLoadedUrl == url && _spriteBitmap is not null)
+                return;
+        }
+
+        NativeVideoDebug.Log("SeekThumb warm start");
         _ = EnsureSpriteBitmapAsync(url);
     }
 
@@ -315,9 +472,9 @@ public sealed partial class NativeVideoPlayerOverlay
         _cropDebounceCts?.Cancel();
         _cropDebounceCts?.Dispose();
         _cropDebounceCts = null;
+        _phonePendingCrop = null;
+        InvalidateSpriteLoad();
         DisposeSpriteBitmap();
-        _spriteLoadTask = null;
-        _spriteLoadingUrl = null;
         _seekPreviewImage.Source = null;
         _seekPreviewImageBorder.IsVisible = false;
         _seekPreview.IsVisible = false;

@@ -251,12 +251,21 @@ public sealed partial class NativeVideoPlayerOverlay : Grid
     private bool IsSkipSegmentOffered =>
         _skipSegmentFocusRing.IsVisible && _skipState.ActiveSegment is not null;
 
+    private bool _playerSubscribed;
+
     public void Attach()
     {
         _deviceType = _deviceService.CachedDeviceType ?? DeviceType.Desktop;
         ApplyDeviceChrome();
-        SubscribePlayer();
-        SubscribeSyncPlay();
+        // ShowAsync fires IsVisibleChanged even when already visible (Play Next). Do not
+        // stack SourceChanged handlers or each swap Invalidates the previous warm.
+        if (!_playerSubscribed)
+        {
+            SubscribePlayer();
+            SubscribeSyncPlay();
+            _playerSubscribed = true;
+        }
+
         ResetHideTimer();
         _ = LoadPreferencesAsync();
         _ = LoadPlaybackStatsAsync();
@@ -266,8 +275,13 @@ public sealed partial class NativeVideoPlayerOverlay : Grid
     {
         StopDpadHold();
         DisposeSeekPreview();
-        UnsubscribePlayer();
-        UnsubscribeSyncPlay();
+        if (_playerSubscribed)
+        {
+            UnsubscribePlayer();
+            UnsubscribeSyncPlay();
+            _playerSubscribed = false;
+        }
+
         StopHideTimer();
         CancelVolumeHoverHide();
         StopSkipNotificationTimer();
@@ -493,6 +507,8 @@ public sealed partial class NativeVideoPlayerOverlay : Grid
                 _player.PlaybackState = PlaybackState.Playing;
             UpdateTransport();
             ResetHideTimer();
+            // SetActive warms before ThumbnailsUrl is bound (empty Source clear). Retry here.
+            WarmSeekThumbnails();
             SyncTvSurfaceComposition();
 #if WINDOWS || LINUX
             // The sidecar VTT often finishes while the veil still covers the cue layer: repaint
@@ -1665,12 +1681,23 @@ public sealed partial class NativeVideoPlayerOverlay : Grid
     private void OnSourceChanged(PlayerSource source) =>
         MainThread.BeginInvokeOnMainThread(() =>
         {
-            DisposeSpriteBitmap();
+            // PlayIndexedFileAsync clears Source then binds the real one. Only drop the
+            // sheet when the sprite URL actually changes - quality remux keeps the same
+            // ThumbnailsUrl and must not cancel an in-flight warm.
+            var nextUrl = ResolveSeekThumbnailsUrl(source.ThumbnailsUrl);
+            var currentUrl = _spriteLoadedUrl ?? _spriteLoadingUrl;
+            if (!string.Equals(nextUrl, currentUrl, StringComparison.Ordinal))
+            {
+                InvalidateSpriteLoad();
+                DisposeSpriteBitmap();
+            }
+
             _titleLabel.Text = source.Title ?? string.Empty;
             _ = RefreshSegmentsAsync();
             RefreshSeekChapters();
             UpdateTransport();
             RefreshSidecarSubtitles();
+            WarmSeekThumbnails();
         });
 
     private void OnSeekDragChanged(object? sender, bool dragging)
