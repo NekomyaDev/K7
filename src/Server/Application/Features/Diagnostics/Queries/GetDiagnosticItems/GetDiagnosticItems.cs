@@ -523,10 +523,16 @@ public class GetDiagnosticItemsQueryHandler : IRequestHandler<GetDiagnosticItems
                 _context, _paths, request.LibraryId, serieIds, cancellationToken: cancellationToken);
 
         var episodeIds = medias.Where(m => m.Type == MediaType.SerieEpisode).Select(m => m.Id).ToList();
+        // Match summary counts (verifyOnDisk: false). Season eligibility still expands to full
+        // seasons when episodeIds is a page slice so Virtualize pages are not emptied.
         var missingIntroOutroEpisodeIds = episodeIds.Count == 0
             ? new HashSet<Guid>()
             : await IntroOutroDiagnosticHelper.GetMissingIntroOutroEpisodeIdsAsync(
-                _context, request.LibraryId, episodeIds, cancellationToken: cancellationToken);
+                _context,
+                request.LibraryId,
+                episodeIds,
+                verifyOnDisk: false,
+                cancellationToken);
 
         // Duplicate detection is a signal-only safety net: media creation is a find-or-create
         // over a fuzzy identity, so duplicates cannot be prevented by construction. See
@@ -1202,7 +1208,11 @@ public class GetDiagnosticItemsQueryHandler : IRequestHandler<GetDiagnosticItems
         CancellationToken cancellationToken)
     {
         var missing = await IntroOutroDiagnosticHelper.GetMissingIntroOutroEpisodesAsync(
-            _context, request.LibraryId, limitToEpisodeIds: null, cancellationToken: cancellationToken);
+            _context,
+            request.LibraryId,
+            limitToEpisodeIds: null,
+            verifyOnDisk: false,
+            cancellationToken: cancellationToken);
 
         if (missing.Count == 0)
             return EmptyPage(request);

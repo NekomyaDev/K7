@@ -45,8 +45,28 @@ public static class IntroOutroDiagnosticHelper
         if (libraryId.HasValue)
             episodeRows = episodeRows.Where(x => x.LibraryId == libraryId.Value);
 
+        // A diagnostic page slice may contain only one episode per season. Eligibility still
+        // needs the full season (2+ files), so expand to those seasons before filtering back.
+        HashSet<Guid>? limitSet = null;
         if (limitToEpisodeIds is not null)
-            episodeRows = episodeRows.Where(x => limitToEpisodeIds.Contains(x.EpisodeId));
+        {
+            limitSet = limitToEpisodeIds as HashSet<Guid> ?? limitToEpisodeIds.ToHashSet();
+            if (limitSet.Count == 0)
+                return [];
+
+            var seasonIds = await context.Medias
+                .OfType<SerieEpisode>()
+                .AsNoTracking()
+                .Where(e => limitSet.Contains(e.Id))
+                .Select(e => e.SeasonId)
+                .Distinct()
+                .ToListAsync(cancellationToken);
+
+            if (seasonIds.Count == 0)
+                return [];
+
+            episodeRows = episodeRows.Where(x => seasonIds.Contains(x.SeasonId));
+        }
 
         var rows = await episodeRows.ToListAsync(cancellationToken);
         var existing = verifyOnDisk
@@ -86,7 +106,7 @@ public static class IntroOutroDiagnosticHelper
             .GroupBy(s => s.MediaId)
             .ToDictionary(g => g.Key, g => g.Select(x => x.Type).ToHashSet());
 
-        return existing
+        var candidates = existing
             .Where(r => eligibleSeasonIds.Contains(r.SeasonId))
             .GroupBy(r => r.EpisodeId)
             .Select(g => g.First())
@@ -100,6 +120,11 @@ public static class IntroOutroDiagnosticHelper
             })
             .Select(r => new EpisodeIntroOutroCandidate(r.EpisodeId, r.SeasonId, r.LibraryId))
             .ToList();
+
+        if (limitSet is not null)
+            candidates = candidates.Where(c => limitSet.Contains(c.EpisodeId)).ToList();
+
+        return candidates;
     }
 
     public static async Task<HashSet<Guid>> GetMissingIntroOutroEpisodeIdsAsync(
