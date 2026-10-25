@@ -1,8 +1,9 @@
-using K7.Server.Domain.Constants;
 using System.Numerics;
 using K7.Server.Application.Common.Interfaces;
 using K7.Server.Application.Features.BackgroundTasks.Commands.CreateBackgroundTask;
 using K7.Server.Application.Features.Medias.Commands.ExtractSerieThemeSong;
+using K7.Server.Application.Helpers;
+using K7.Server.Domain.Constants;
 using K7.Server.Domain.Entities;
 using K7.Server.Domain.Entities.Medias;
 using K7.Server.Domain.Entities.Metadatas.Files;
@@ -24,13 +25,7 @@ public class DetectMediaSegmentsCommandHandler : IRequestHandler<DetectMediaSegm
     private readonly ISender _sender;
     private readonly ILogger<DetectMediaSegmentsCommandHandler> _logger;
 
-    // Fingerprint comparison (from intro-skipper)
-    private const int MaxFingerprintPointDifferences = 6;
-    private const double MaxTimeSkipSeconds = 3.5;
-    private const int InvertedIndexShift = 2;
-    private const double SampleDuration = 4096.0 / 11025.0 / 3.0;
-
-    // Segment duration limits (seconds)
+    // Segment duration limits (seconds) - keep in sync with ChapterSegmentFallbackHelper / matcher calls
     private const double MinIntroDurationSeconds = 15;
     private const double MaxIntroDurationSeconds = 120;
     private const double MinOutroDurationSeconds = 15;
@@ -78,6 +73,23 @@ public class DetectMediaSegmentsCommandHandler : IRequestHandler<DetectMediaSegm
             return;
         }
 
+        var serieLocked = await _context.Medias
+            .OfType<Serie>()
+            .AsNoTracking()
+            .Where(s => s.Id == season.SerieId)
+            .Select(s => s.LockedFields)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (serieLocked is not null && serieLocked.Contains(MediaLockFields.IntroOutro))
+        {
+            _logger.LogInformation(
+                "Skipping segment detection for season {SeasonId}: serie {SerieId} has {Lock} locked",
+                request.SeasonId,
+                season.SerieId,
+                MediaLockFields.IntroOutro);
+            return;
+        }
+
         var episodes = season.Episodes
             .Where(e => e.IndexedFiles.Any(f => f.FileMetadata is not null && File.Exists(f.Path)))
             .OrderBy(e => e.EpisodeNumber)
@@ -96,6 +108,10 @@ public class DetectMediaSegmentsCommandHandler : IRequestHandler<DetectMediaSegm
             newSegments = await RunIncrementalDetectionAsync(episodes, cancellationToken);
         else
             newSegments = await RunFullDetectionAsync(episodes, cancellationToken);
+
+        var chapterFallbacks = await BuildChapterFallbackSegmentsAsync(episodes, newSegments, cancellationToken);
+        if (chapterFallbacks.Count > 0)
+            newSegments.AddRange(chapterFallbacks);
 
         if (newSegments.Count > 0)
         {
@@ -164,16 +180,24 @@ public class DetectMediaSegmentsCommandHandler : IRequestHandler<DetectMediaSegm
 
         LogFingerprintDiagnostics(episodeData);
 
-        var introMatches = FindBestMatches(episodeData, isOutro: false, _logger);
-        var outroMatches = FindBestMatches(episodeData, isOutro: true, _logger);
+        var introMatches = ChromaprintFingerprintMatcher.FindBestMatches(
+            episodeData.Select(e => e.IntroFingerprint).ToList(),
+            MinIntroDurationSeconds,
+            MaxIntroDurationSeconds);
+        var outroMatches = ChromaprintFingerprintMatcher.FindBestMatches(
+            episodeData.Select(e => e.OutroFingerprint).ToList(),
+            MinOutroDurationSeconds,
+            MaxOutroDurationSeconds);
 
         _logger.LogInformation(
-            "Found intros for {IntroCount}/{Total} and outros for {OutroCount}/{Total} episodes",
-            introMatches.Count, episodeData.Count, outroMatches.Count, episodeData.Count);
+            "Found intros for {IntroCount}/{Total} and outros for {OutroCount}/{Total} episodes (neighborRadius={Radius})",
+            introMatches.Count, episodeData.Count, outroMatches.Count, episodeData.Count,
+            ChromaprintFingerprintMatcher.NeighborRadius);
 
-        foreach (var data in episodeData)
+        for (var i = 0; i < episodeData.Count; i++)
         {
-            if (introMatches.TryGetValue(data.Episode.Id, out var introMatch))
+            var data = episodeData[i];
+            if (introMatches.TryGetValue(i, out var introMatch))
             {
                 var (start, end) = await AdjustSegmentBoundariesAsync(
                     data.File.Path, introMatch.StartSeconds, introMatch.EndSeconds,
@@ -190,7 +214,7 @@ public class DetectMediaSegmentsCommandHandler : IRequestHandler<DetectMediaSegm
                 });
             }
 
-            if (outroMatches.TryGetValue(data.Episode.Id, out var outroMatch))
+            if (outroMatches.TryGetValue(i, out var outroMatch))
             {
                 var outroOffset = data.DurationSeconds - GetAnalysisWindowSeconds(data.DurationSeconds);
                 var absoluteStart = outroOffset + outroMatch.StartSeconds;
@@ -251,10 +275,12 @@ public class DetectMediaSegmentsCommandHandler : IRequestHandler<DetectMediaSegm
                     popCounts[pc]++;
                 }
 
-                var matchingAtThreshold = popCounts.Take(MaxFingerprintPointDifferences + 1).Sum();
+                var matchingAtThreshold = popCounts
+                    .Take(ChromaprintFingerprintMatcher.MaxFingerprintPointDifferences + 1)
+                    .Sum();
                 _logger.LogInformation(
                     "Diagnostic ep1 vs ep2 at shift=0: overlap={Overlap}, matching (popcount<={Threshold}): {Matching}/{Total} ({Pct:F1}%), popcount[0]={P0}, [1-3]={P13}, [4-6]={P46}, [7-10]={P710}, [11+]={P11}",
-                    overlapLen, MaxFingerprintPointDifferences,
+                    overlapLen, ChromaprintFingerprintMatcher.MaxFingerprintPointDifferences,
                     matchingAtThreshold, overlapLen,
                     overlapLen > 0 ? 100.0 * matchingAtThreshold / overlapLen : 0,
                     popCounts[0],
@@ -311,7 +337,7 @@ public class DetectMediaSegmentsCommandHandler : IRequestHandler<DetectMediaSegm
         var minDuration = isOutro ? MinOutroDurationSeconds : MinIntroDurationSeconds;
         var maxDuration = isOutro ? MaxOutroDurationSeconds : MaxIntroDurationSeconds;
 
-        SegmentMatch? best = null;
+        ChromaprintFingerprintMatcher.SegmentMatch? best = null;
         var bestDuration = 0.0;
 
         foreach (var refEp in references)
@@ -320,7 +346,7 @@ public class DetectMediaSegmentsCommandHandler : IRequestHandler<DetectMediaSegm
             if (refFp is null)
                 continue;
 
-            var match = CompareFingerprints(refFp, newFp);
+            var match = ChromaprintFingerprintMatcher.CompareFingerprints(refFp, newFp);
             if (match is null)
                 continue;
 
@@ -331,7 +357,8 @@ public class DetectMediaSegmentsCommandHandler : IRequestHandler<DetectMediaSegm
             if (duration > bestDuration)
             {
                 bestDuration = duration;
-                best = new SegmentMatch(match.Value.RhsStartSeconds, match.Value.RhsEndSeconds);
+                best = new ChromaprintFingerprintMatcher.SegmentMatch(
+                    match.Value.RhsStartSeconds, match.Value.RhsEndSeconds);
             }
         }
 
@@ -402,208 +429,90 @@ public class DetectMediaSegmentsCommandHandler : IRequestHandler<DetectMediaSegm
         return result;
     }
 
-    // -- All-pairs matching --
+    // -- Chapter-title fallback (when chromaprint misses Intro/Outro) --
 
-    private static Dictionary<Guid, SegmentMatch> FindBestMatches(
-        List<EpisodeData> episodes,
-        bool isOutro,
-        ILogger logger)
+    private async Task<List<MediaSegment>> BuildChapterFallbackSegmentsAsync(
+        List<SerieEpisode> episodes,
+        List<MediaSegment> chromaprintSegments,
+        CancellationToken cancellationToken)
     {
-        var bestMatches = new Dictionary<Guid, SegmentMatch>();
-        var minDuration = isOutro ? MinOutroDurationSeconds : MinIntroDurationSeconds;
-        var maxDuration = isOutro ? MaxOutroDurationSeconds : MaxIntroDurationSeconds;
-        var label = isOutro ? "outro" : "intro";
-        var comparisonsAttempted = 0;
-        var comparisonsWithMatch = 0;
+        var segments = new List<MediaSegment>();
+        var byEpisode = chromaprintSegments
+            .GroupBy(s => s.MediaId)
+            .ToDictionary(g => g.Key, g => g.Select(s => s.Type).ToHashSet());
 
-        for (var i = 0; i < episodes.Count; i++)
+        foreach (var episode in episodes)
         {
-            var fpI = isOutro ? episodes[i].OutroFingerprint : episodes[i].IntroFingerprint;
-            if (fpI is null)
+            var file = episode.IndexedFiles.FirstOrDefault(f => f.FileMetadata is not null && File.Exists(f.Path));
+            if (file is null)
                 continue;
 
-            for (var j = i + 1; j < episodes.Count; j++)
-            {
-                var fpJ = isOutro ? episodes[j].OutroFingerprint : episodes[j].IntroFingerprint;
-                if (fpJ is null)
-                    continue;
-
-                comparisonsAttempted++;
-                var match = CompareFingerprints(fpI, fpJ, logger, comparisonsAttempted <= 3 ? label : null);
-                if (match is null)
-                    continue;
-
-                comparisonsWithMatch++;
-                TryUpdateBestMatch(bestMatches, episodes[i].Episode.Id,
-                    match.Value.LhsStartSeconds, match.Value.LhsEndSeconds, minDuration, maxDuration);
-                TryUpdateBestMatch(bestMatches, episodes[j].Episode.Id,
-                    match.Value.RhsStartSeconds, match.Value.RhsEndSeconds, minDuration, maxDuration);
-            }
-        }
-
-        logger.LogInformation(
-            "FindBestMatches ({Label}): {WithMatch}/{Attempted} comparisons produced a match",
-            label, comparisonsWithMatch, comparisonsAttempted);
-
-        return bestMatches;
-    }
-
-    private static void TryUpdateBestMatch(
-        Dictionary<Guid, SegmentMatch> matches,
-        Guid episodeId,
-        double startSeconds,
-        double endSeconds,
-        double minDuration,
-        double maxDuration)
-    {
-        var duration = endSeconds - startSeconds;
-        if (duration < minDuration || duration > maxDuration)
-            return;
-
-        if (!matches.TryGetValue(episodeId, out var existing) ||
-            duration > existing.EndSeconds - existing.StartSeconds)
-        {
-            matches[episodeId] = new SegmentMatch(startSeconds, endSeconds);
-        }
-    }
-
-    // -- Core fingerprint comparison (inverted index approach from intro-skipper) --
-
-    private static FingerprintMatch? CompareFingerprints(uint[] lhs, uint[] rhs, ILogger? logger = null, string? diagLabel = null)
-    {
-        if (lhs.Length == 0 || rhs.Length == 0)
-        {
-            if (diagLabel is not null)
-                logger?.LogWarning("CompareFingerprints ({Label}): empty fingerprint - lhs={LhsLen}, rhs={RhsLen}", diagLabel, lhs.Length, rhs.Length);
-            return null;
-        }
-
-        var rhsIndex = CreateInvertedIndex(rhs);
-        var candidateShifts = FindCandidateShifts(lhs, rhsIndex);
-
-        if (diagLabel is not null)
-        {
-            logger?.LogInformation(
-                "CompareFingerprints ({Label}): lhs={LhsLen}, rhs={RhsLen}, rhsIndex={IndexSize}, candidates={ShiftCount}",
-                diagLabel, lhs.Length, rhs.Length, rhsIndex.Count, candidateShifts.Count);
-        }
-
-        FingerprintMatch? best = null;
-        var bestDuration = 0.0;
-
-        foreach (var shift in candidateShifts)
-        {
-            var result = FindContiguousAtShift(lhs, rhs, shift);
-            if (result is null)
+            var durationSeconds = GetDurationSeconds(file);
+            if (durationSeconds <= 0)
                 continue;
 
-            var duration = result.Value.LhsEndSeconds - result.Value.LhsStartSeconds;
-            if (duration > bestDuration)
+            var existing = byEpisode.GetValueOrDefault(episode.Id)
+                ?? episode.Segments.Select(s => s.Type).ToHashSet();
+
+            var needIntro = !existing.Contains(MediaSegmentType.Intro);
+            var needOutro = !existing.Contains(MediaSegmentType.Outro);
+            if (!needIntro && !needOutro)
+                continue;
+
+            var chapters = await _segmentDetectionService.GetChaptersAsync(file.Path, cancellationToken);
+            if (chapters.Count == 0)
+                continue;
+
+            if (needIntro)
             {
-                bestDuration = duration;
-                best = result;
+                foreach (var chapter in chapters)
+                {
+                    if (!ChapterSegmentFallbackHelper.TryCreateSegment(
+                            chapter, durationSeconds, MediaSegmentType.Intro, out var start, out var end))
+                        continue;
+
+                    segments.Add(new MediaSegment
+                    {
+                        Id = Guid.NewGuid(),
+                        MediaId = episode.Id,
+                        Type = MediaSegmentType.Intro,
+                        StartMs = (long)(start * 1000),
+                        EndMs = (long)(end * 1000),
+                        DetectedAt = DateTimeOffset.UtcNow
+                    });
+                    _logger.LogInformation(
+                        "Chapter fallback Intro for episode {EpisodeId}: {Start:F1}s-{End:F1}s ({Title})",
+                        episode.Id, start, end, chapter.Title);
+                    break;
+                }
+            }
+
+            if (needOutro)
+            {
+                foreach (var chapter in chapters.Reverse())
+                {
+                    if (!ChapterSegmentFallbackHelper.TryCreateSegment(
+                            chapter, durationSeconds, MediaSegmentType.Outro, out var start, out var end))
+                        continue;
+
+                    segments.Add(new MediaSegment
+                    {
+                        Id = Guid.NewGuid(),
+                        MediaId = episode.Id,
+                        Type = MediaSegmentType.Outro,
+                        StartMs = (long)(start * 1000),
+                        EndMs = (long)(end * 1000),
+                        DetectedAt = DateTimeOffset.UtcNow
+                    });
+                    _logger.LogInformation(
+                        "Chapter fallback Outro for episode {EpisodeId}: {Start:F1}s-{End:F1}s ({Title})",
+                        episode.Id, start, end, chapter.Title);
+                    break;
+                }
             }
         }
 
-        if (diagLabel is not null)
-        {
-            if (best is not null)
-                logger?.LogInformation(
-                    "CompareFingerprints ({Label}): best match {Duration:F2}s at lhs[{Start:F2}..{End:F2}]",
-                    diagLabel, bestDuration, best.Value.LhsStartSeconds, best.Value.LhsEndSeconds);
-            else
-                logger?.LogWarning("CompareFingerprints ({Label}): no match found across {ShiftCount} shifts", diagLabel, candidateShifts.Count);
-        }
-
-        return best;
-    }
-
-    private static Dictionary<uint, int> CreateInvertedIndex(uint[] fingerprint)
-    {
-        var index = new Dictionary<uint, int>(fingerprint.Length);
-        for (var i = 0; i < fingerprint.Length; i++)
-            index[fingerprint[i]] = i;
-        return index;
-    }
-
-    private static HashSet<int> FindCandidateShifts(uint[] lhs, Dictionary<uint, int> rhsIndex)
-    {
-        var shifts = new HashSet<int>();
-
-        // Always try direct alignment
-        shifts.Add(0);
-
-        for (var i = 0; i < lhs.Length; i++)
-        {
-            var value = lhs[i];
-            for (var delta = -InvertedIndexShift; delta <= InvertedIndexShift; delta++)
-            {
-                var target = unchecked((uint)((long)value + delta));
-                if (rhsIndex.TryGetValue(target, out var rhsPos))
-                    shifts.Add(i - rhsPos);
-            }
-        }
-
-        return shifts;
-    }
-
-    private static FingerprintMatch? FindContiguousAtShift(uint[] lhs, uint[] rhs, int shift)
-    {
-        var lhsOffset = Math.Max(0, shift);
-        var rhsOffset = Math.Max(0, -shift);
-        var overlapLength = Math.Min(lhs.Length - lhsOffset, rhs.Length - rhsOffset);
-
-        if (overlapLength <= 0)
-            return null;
-
-        var matchIndices = new List<int>();
-        for (var i = 0; i < overlapLength; i++)
-        {
-            var diff = BitOperations.PopCount(lhs[lhsOffset + i] ^ rhs[rhsOffset + i]);
-            if (diff <= MaxFingerprintPointDifferences)
-                matchIndices.Add(i);
-        }
-
-        if (matchIndices.Count == 0)
-            return null;
-
-        var (runStart, runEnd) = FindLongestContiguousRun(matchIndices);
-        if (runStart < 0)
-            return null;
-
-        var firstIdx = matchIndices[runStart];
-        var lastIdx = matchIndices[runEnd];
-
-        return new FingerprintMatch(
-            LhsStartSeconds: (lhsOffset + firstIdx) * SampleDuration,
-            LhsEndSeconds: (lhsOffset + lastIdx + 1) * SampleDuration,
-            RhsStartSeconds: (rhsOffset + firstIdx) * SampleDuration,
-            RhsEndSeconds: (rhsOffset + lastIdx + 1) * SampleDuration);
-    }
-
-    private static (int StartIndex, int EndIndex) FindLongestContiguousRun(List<int> matchIndices)
-    {
-        if (matchIndices.Count == 0)
-            return (-1, -1);
-
-        var bestStart = 0;
-        var bestEnd = 0;
-        var currentStart = 0;
-
-        for (var i = 1; i < matchIndices.Count; i++)
-        {
-            var timeDelta = (matchIndices[i] - matchIndices[i - 1]) * SampleDuration;
-            if (timeDelta > MaxTimeSkipSeconds)
-                currentStart = i;
-
-            if (i - currentStart > bestEnd - bestStart)
-            {
-                bestStart = currentStart;
-                bestEnd = i;
-            }
-        }
-
-        return (bestStart, bestEnd);
+        return segments;
     }
 
     // -- Boundary adjustment --
@@ -762,12 +671,6 @@ public class DetectMediaSegmentsCommandHandler : IRequestHandler<DetectMediaSegm
     }
 
     // -- Inner types --
-
-    private readonly record struct FingerprintMatch(
-        double LhsStartSeconds, double LhsEndSeconds,
-        double RhsStartSeconds, double RhsEndSeconds);
-
-    private readonly record struct SegmentMatch(double StartSeconds, double EndSeconds);
 
     private record EpisodeData(
         SerieEpisode Episode,

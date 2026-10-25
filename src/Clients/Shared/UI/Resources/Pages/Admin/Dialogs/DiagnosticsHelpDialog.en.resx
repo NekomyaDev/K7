@@ -47,7 +47,7 @@
   <data name="Def_MissingHlsSegments" xml:space="preserve"><value>HLS keyframe segments for transmuxing have not been computed for this file yet.</value></data>
   <data name="Def_MissingChapters" xml:space="preserve"><value>Embedded file chapters have not been extracted while chapter extraction is enabled on the library.</value></data>
   <data name="Def_MissingThemeSong" xml:space="preserve"><value>Serie eligible for theme song generation with no theme file available (sidecar or extract).</value></data>
-  <data name="Def_MissingIntroOutro" xml:space="preserve"><value>Episode eligible for intro/outro detection with neither Intro nor Outro segments detected.</value></data>
+  <data name="Def_MissingIntroOutro" xml:space="preserve"><value>Episode eligible for detection that is missing Intro and/or Outro (including outro-only). Lock IntroOutro on the series to hide it.</value></data>
   <data name="Def_MissingAudioAnalysis" xml:space="preserve"><value>Audio analysis (AudioMuse) is missing for a music track.</value></data>
 
   <data name="Bulk_OrphanFile" xml:space="preserve"><value>Queues media creation (RetryCreateMedia) to attach identified files. Unidentified ones still need manual re-identify.</value></data>

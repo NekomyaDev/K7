@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using System.Globalization;
 using FFMpegCore;
 using K7.Server.Application.Common.Interfaces;
+using K7.Server.Domain.Entities.Metadatas.Files;
 using Microsoft.Extensions.Logging;
 
 namespace K7.Server.Infrastructure.MediaProcessing;
@@ -142,10 +143,17 @@ public partial class SegmentDetectionService(ILogger<SegmentDetectionService> lo
         string filePath,
         CancellationToken cancellationToken = default)
     {
+        var chapters = await GetChaptersAsync(filePath, cancellationToken);
+        return chapters.Select(c => c.StartSeconds).ToList();
+    }
+
+    public async Task<IReadOnlyList<ChapterMarker>> GetChaptersAsync(
+        string filePath,
+        CancellationToken cancellationToken = default)
+    {
         try
         {
-            var chapters = await ChapterProbe.ReadAsync(filePath, cancellationToken);
-            return chapters.Select(c => c.StartSeconds).ToList();
+            return await ChapterProbe.ReadAsync(filePath, cancellationToken);
         }
         catch (Exception ex)
         {

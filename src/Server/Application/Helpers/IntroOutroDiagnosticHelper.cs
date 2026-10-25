@@ -1,4 +1,5 @@
 using K7.Server.Application.Common.Interfaces;
+using K7.Server.Domain.Constants;
 using K7.Server.Domain.Entities.Medias;
 using K7.Server.Domain.Enums;
 
@@ -10,7 +11,8 @@ public static class IntroOutroDiagnosticHelper
 
     /// <summary>
     /// Episodes in intro-detection-enabled libraries whose season is detection-eligible
-    /// (2+ episodes with existing files) and that have neither Intro nor Outro segments.
+    /// (2+ episodes with existing files) and that are missing Intro and/or Outro.
+    /// Series with <see cref="MediaLockFields.IntroOutro"/> locked are excluded.
     /// </summary>
     /// <param name="verifyOnDisk">
     /// When true (default), each indexed episode path is checked with <see cref="File.Exists"/>.
@@ -35,6 +37,7 @@ public static class IntroOutroDiagnosticHelper
             {
                 EpisodeId = episode.Id,
                 episode.SeasonId,
+                episode.SerieId,
                 file.LibraryId,
                 Path = file.Path!
             };
@@ -49,6 +52,13 @@ public static class IntroOutroDiagnosticHelper
         var existing = verifyOnDisk
             ? rows.Where(r => File.Exists(r.Path)).ToList()
             : rows;
+
+        var lockedSerieIds = await LoadIntroOutroLockedSerieIdsAsync(
+            context,
+            existing.Select(r => r.SerieId).Distinct().ToList(),
+            cancellationToken);
+
+        existing = existing.Where(r => !lockedSerieIds.Contains(r.SerieId)).ToList();
 
         var eligibleSeasonIds = existing
             .GroupBy(r => r.SeasonId)
@@ -65,24 +75,30 @@ public static class IntroOutroDiagnosticHelper
             .Distinct()
             .ToList();
 
-        var episodesWithSegments = await context.MediaSegments
+        var segmentRows = await context.MediaSegments
             .AsNoTracking()
             .Where(s => candidateEpisodeIds.Contains(s.MediaId)
                 && (s.Type == MediaSegmentType.Intro || s.Type == MediaSegmentType.Outro))
-            .Select(s => s.MediaId)
-            .Distinct()
+            .Select(s => new { s.MediaId, s.Type })
             .ToListAsync(cancellationToken);
 
-        var withSegments = episodesWithSegments.ToHashSet();
+        var typesByEpisode = segmentRows
+            .GroupBy(s => s.MediaId)
+            .ToDictionary(g => g.Key, g => g.Select(x => x.Type).ToHashSet());
 
         return existing
-            .Where(r => eligibleSeasonIds.Contains(r.SeasonId) && !withSegments.Contains(r.EpisodeId))
+            .Where(r => eligibleSeasonIds.Contains(r.SeasonId))
             .GroupBy(r => r.EpisodeId)
-            .Select(g =>
+            .Select(g => g.First())
+            .Where(r =>
             {
-                var first = g.First();
-                return new EpisodeIntroOutroCandidate(first.EpisodeId, first.SeasonId, first.LibraryId);
+                if (!typesByEpisode.TryGetValue(r.EpisodeId, out var types))
+                    return true;
+
+                return !types.Contains(MediaSegmentType.Intro)
+                    || !types.Contains(MediaSegmentType.Outro);
             })
+            .Select(r => new EpisodeIntroOutroCandidate(r.EpisodeId, r.SeasonId, r.LibraryId))
             .ToList();
     }
 
@@ -111,5 +127,26 @@ public static class IntroOutroDiagnosticHelper
         return candidates
             .GroupBy(c => c.LibraryId)
             .ToDictionary(g => g.Key, g => g.Count());
+    }
+
+    public static async Task<HashSet<Guid>> LoadIntroOutroLockedSerieIdsAsync(
+        IApplicationDbContext context,
+        IReadOnlyCollection<Guid> serieIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (serieIds.Count == 0)
+            return [];
+
+        var rows = await context.Medias
+            .OfType<Serie>()
+            .AsNoTracking()
+            .Where(s => serieIds.Contains(s.Id))
+            .Select(s => new { s.Id, s.LockedFields })
+            .ToListAsync(cancellationToken);
+
+        return rows
+            .Where(s => s.LockedFields.Contains(MediaLockFields.IntroOutro))
+            .Select(s => s.Id)
+            .ToHashSet();
     }
 }

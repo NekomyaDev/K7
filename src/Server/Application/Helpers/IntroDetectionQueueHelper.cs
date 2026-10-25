@@ -1,6 +1,7 @@
 using K7.Server.Application.Common.Interfaces;
 using K7.Server.Application.Features.BackgroundTasks.Commands.CreateBackgroundTask;
 using K7.Server.Application.Features.Medias.Commands.DetectMediaSegments;
+using K7.Server.Domain.Constants;
 using K7.Server.Domain.Entities.Medias;
 using K7.Server.Domain.Entities.Metadatas.Files;
 using K7.Server.Domain.Enums;
@@ -44,6 +45,22 @@ public static class IntroDetectionQueueHelper
         if (episode is null)
         {
             logger.LogDebug("Intro detection skipped: media {MediaId} is not a SerieEpisode", mediaId);
+            return;
+        }
+
+        var serieLocked = await context.Medias
+            .OfType<Serie>()
+            .AsNoTracking()
+            .Where(s => s.Id == episode.SerieId)
+            .Select(s => s.LockedFields)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (serieLocked is not null && serieLocked.Contains(MediaLockFields.IntroOutro))
+        {
+            logger.LogDebug(
+                "Intro detection skipped: serie {SerieId} has {Lock} locked",
+                episode.SerieId,
+                MediaLockFields.IntroOutro);
             return;
         }
 

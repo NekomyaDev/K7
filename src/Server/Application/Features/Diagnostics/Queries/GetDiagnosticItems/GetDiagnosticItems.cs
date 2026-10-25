@@ -759,9 +759,10 @@ public class GetDiagnosticItemsQueryHandler : IRequestHandler<GetDiagnosticItems
                                         && l.IntroDetectionEnabled
                                         && l.ThemeSongGenerationEnabled)))
                         || m.Type == MediaType.SerieEpisode
-                            && !_context.MediaSegments.Any(s =>
-                                s.MediaId == m.Id
-                                && (s.Type == MediaSegmentType.Intro || s.Type == MediaSegmentType.Outro))
+                            && (!_context.MediaSegments.Any(s =>
+                                    s.MediaId == m.Id && s.Type == MediaSegmentType.Intro)
+                                || !_context.MediaSegments.Any(s =>
+                                    s.MediaId == m.Id && s.Type == MediaSegmentType.Outro))
                             && _context.IndexedFiles.Any(f =>
                                 f.MediaId == m.Id
                                 && _context.Libraries.Any(l =>
@@ -850,9 +851,10 @@ public class GetDiagnosticItemsQueryHandler : IRequestHandler<GetDiagnosticItems
         {
             Add(medias
                 .Where(m => m.Type == MediaType.SerieEpisode
-                    && !_context.MediaSegments.Any(s =>
-                        s.MediaId == m.Id
-                        && (s.Type == MediaSegmentType.Intro || s.Type == MediaSegmentType.Outro))
+                    && (!_context.MediaSegments.Any(s =>
+                            s.MediaId == m.Id && s.Type == MediaSegmentType.Intro)
+                        || !_context.MediaSegments.Any(s =>
+                            s.MediaId == m.Id && s.Type == MediaSegmentType.Outro))
                     && _context.IndexedFiles.Any(f =>
                         f.MediaId == m.Id
                         && _context.Libraries.Any(l =>

@@ -1,3 +1,5 @@
+using K7.Server.Domain.Entities.Metadatas.Files;
+
 namespace K7.Server.Application.Common.Interfaces;
 
 public record SilencePeriod(double StartSeconds, double EndSeconds);
@@ -23,6 +25,10 @@ public interface ISegmentDetectionService
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<double>> GetChapterTimesAsync(
+        string filePath,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<ChapterMarker>> GetChaptersAsync(
         string filePath,
         CancellationToken cancellationToken = default);
 }

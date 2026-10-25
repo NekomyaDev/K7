@@ -51,6 +51,12 @@ public static class ThemeSongDiagnosticHelper
             ? rows.Where(r => File.Exists(r.Path)).ToList()
             : rows;
 
+        var lockedSerieIds = await IntroOutroDiagnosticHelper.LoadIntroOutroLockedSerieIdsAsync(
+            context,
+            existing.Select(r => r.SerieId).Distinct().ToList(),
+            cancellationToken);
+        existing = existing.Where(r => !lockedSerieIds.Contains(r.SerieId)).ToList();
+
         var eligibleSeasonIds = existing
             .GroupBy(r => r.SeasonId)
             .Where(g => g.Select(x => x.Path).Distinct().Count() >= 2)
