@@ -459,7 +459,9 @@ public static class MediaMappings
     }
 
     private static int? GetUserRating(BaseMedia domain) =>
-        domain.Ratings.OfType<UserRating>().FirstOrDefault()?.Value is double v ? (int)v : null;
+        domain.Ratings.OfType<UserRating>().FirstOrDefault(r => r.Value > 0)?.Value is double v
+            ? (int)Math.Round(v)
+            : null;
 
     private static double? GetCommunityRating(BaseMedia domain)
     {

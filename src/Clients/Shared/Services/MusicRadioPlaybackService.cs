@@ -1,6 +1,7 @@
 using K7.Clients.Shared.Helpers;
 using K7.Clients.Shared.Interfaces;
 using K7.Clients.Shared.Models;
+using K7.Server.Domain.Enums;
 using K7.Shared.Dtos.Entities.Medias;
 using K7.Shared.Interfaces;
 using Microsoft.Extensions.Logging;
@@ -18,6 +19,7 @@ public sealed class MusicRadioPlaybackService : IMusicRadioPlaybackService, IDis
     private readonly IServerInfoService _serverInfo;
     private readonly IAudioPlayerService _audio;
     private readonly IK7ServerService _apiClient;
+    private readonly IUserRatingSync _ratings;
     private readonly ILogger<MusicRadioPlaybackService> _logger;
 
     private CancellationTokenSource? _refillCts;
@@ -28,11 +30,13 @@ public sealed class MusicRadioPlaybackService : IMusicRadioPlaybackService, IDis
         IServerInfoService serverInfo,
         IAudioPlayerService audio,
         IK7ServerService apiClient,
+        IUserRatingSync ratings,
         ILogger<MusicRadioPlaybackService> logger)
     {
         _serverInfo = serverInfo;
         _audio = audio;
         _apiClient = apiClient;
+        _ratings = ratings;
         _logger = logger;
         _audio.ActiveRadioChanged += OnActiveRadioChanged;
         _audio.RestoredPlaybackStarted += OnRestoredPlaybackStarted;
@@ -68,7 +72,7 @@ public sealed class MusicRadioPlaybackService : IMusicRadioPlaybackService, IDis
 
         try
         {
-            var firstBatch = await FetchTracksAsync(request, FastStartBatchSize, [], cancellationToken);
+            var firstBatch = await FetchTracksAsync(request, FastStartBatchSize, BuildExcludeIds(request), cancellationToken);
             if (firstBatch.Count == 0)
                 return false;
 
@@ -144,7 +148,7 @@ public sealed class MusicRadioPlaybackService : IMusicRadioPlaybackService, IDis
                     if (request is null)
                         return;
 
-                    var excludeIds = _audio.Queue.Select(t => t.MediaId).ToArray();
+                    var excludeIds = BuildExcludeIds(request);
                     var moreTracks = await FetchTracksAsync(request, RefillBatchSize, excludeIds, cancellationToken);
                     _audio.AddToQueue(moreTracks);
 
@@ -185,13 +189,39 @@ public sealed class MusicRadioPlaybackService : IMusicRadioPlaybackService, IDis
             excludeIds: excludeIds.Length > 0 ? excludeIds : null,
             cancellationToken: cancellationToken);
 
+        var discovery = IsDiscoveryRadio(request.RadioType);
         return results?
             .OfType<LiteMusicTrackDto>()
             .Where(t => t.IndexedFileId.HasValue)
+            .Where(t => !discovery || !IsKnownRated(t))
             .ToList() is { Count: > 0 } tracks
             ? MusicTrackQueueMapper.ToQueueItems(tracks, _apiClient)
             : [];
     }
+
+    private Guid[] BuildExcludeIds(MusicRadioRequest request)
+    {
+        var ids = _audio.Queue.Select(t => t.MediaId).ToHashSet();
+        if (IsDiscoveryRadio(request.RadioType))
+        {
+            // Offline / in-session ratings may not be on the server yet.
+            foreach (var mediaId in _ratings.GetPositivelyRatedMediaIds())
+                ids.Add(mediaId);
+        }
+
+        return ids.ToArray();
+    }
+
+    private bool IsKnownRated(LiteMusicTrackDto track)
+    {
+        if (track.UserRating is > 0)
+            return true;
+        return _ratings.TryGet(track.Id, out var cached) && cached is > 0;
+    }
+
+    private static bool IsDiscoveryRadio(string radioType) =>
+        string.Equals(radioType, nameof(MusicRadioType.Discovery), StringComparison.OrdinalIgnoreCase)
+        || string.Equals(radioType, nameof(MusicRadioType.DiscoveryAi), StringComparison.OrdinalIgnoreCase);
 
     private void SetLoading(bool isLoading, string? presetTitle)
     {

@@ -472,6 +472,95 @@ public class GetMusicRadioQueryHandlerTests
     }
 
     [Test]
+    public async Task Handle_Discovery_ShouldExcludeTracks_WhenArtistIsRated()
+    {
+        _context.Ratings.RemoveRange(_context.Ratings.OfType<UserRating>().Where(r => r.MediaId == _favoriteTrackId));
+        _context.Ratings.Add(new UserRating
+        {
+            UserId = _userId,
+            MediaId = _artistId,
+            Value = 9,
+            MinimumValue = 0,
+            MaximumValue = 10
+        });
+        await _context.SaveChangesAsync();
+
+        var result = await _handler.Handle(new GetMusicRadioQuery
+        {
+            RadioType = MusicRadioType.Discovery,
+            Limit = 3
+        }, CancellationToken.None);
+
+        result.Should().BeEmpty();
+    }
+
+    [Test]
+    public async Task Handle_DiscoveryAi_ShouldExcludeNeighbors_WhenAlbumIsRated()
+    {
+        _context.Ratings.Add(new UserRating
+        {
+            UserId = _userId,
+            MediaId = _albumId,
+            Value = 7,
+            MinimumValue = 0,
+            MaximumValue = 10
+        });
+        await _context.SaveChangesAsync();
+
+        _musicIntelligence
+            .GetSimilarTracksAsync(
+                _favoriteTrackId,
+                Arg.Any<int>(),
+                Arg.Any<string?>(),
+                Arg.Any<string?>(),
+                Arg.Any<CancellationToken>())
+            .Returns([new MusicIntelligenceTrackMatchDto { ItemId = _similarTrackId }]);
+
+        var result = await _handler.Handle(new GetMusicRadioQuery
+        {
+            RadioType = MusicRadioType.DiscoveryAi,
+            Limit = 3
+        }, CancellationToken.None);
+
+        result.Should().BeEmpty();
+    }
+
+    [Test]
+    public async Task Handle_DiscoveryAi_ShouldIgnoreOtherUsersRatings_OnNeighbors()
+    {
+        var otherUserId = Guid.NewGuid();
+        _context.Users.Add(new User { Id = otherUserId, IdentityUserId = "other", DisplayName = "other" });
+        _context.Ratings.Add(new UserRating
+        {
+            UserId = otherUserId,
+            MediaId = _similarTrackId,
+            Value = 10,
+            MinimumValue = 0,
+            MaximumValue = 10
+        });
+        await _context.SaveChangesAsync();
+
+        _musicIntelligence
+            .GetSimilarTracksAsync(
+                _favoriteTrackId,
+                Arg.Any<int>(),
+                Arg.Any<string?>(),
+                Arg.Any<string?>(),
+                Arg.Any<CancellationToken>())
+            .Returns([new MusicIntelligenceTrackMatchDto { ItemId = _similarTrackId }]);
+
+        var result = await _handler.Handle(new GetMusicRadioQuery
+        {
+            RadioType = MusicRadioType.DiscoveryAi,
+            Limit = 3
+        }, CancellationToken.None);
+
+        result.Should().ContainSingle(t => t.Id == _similarTrackId);
+        var track = result.OfType<MusicTrack>().Single();
+        track.Ratings.OfType<UserRating>().Should().BeEmpty();
+    }
+
+    [Test]
     public async Task Handle_DiscoveryAi_ShouldReturnEmpty_WhenIntelligenceDisabled()
     {
         _musicIntelligence.IsEnabledAsync(Arg.Any<CancellationToken>()).Returns(false);

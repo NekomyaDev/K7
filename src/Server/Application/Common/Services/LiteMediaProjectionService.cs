@@ -471,8 +471,24 @@ public sealed class LiteMediaProjectionService(IApplicationDbContext context)
             .AsNoTracking()
             .ToListAsync(cancellationToken);
 
+        // Ratings Include cannot use a per-user filter reliably on TPH. Trim here so
+        // ToLiteMediaDto does not surface another listener's stars on radio / lite payloads.
+        foreach (var item in items)
+            ScopeRatingsToUser(item, userId);
+
         var itemsById = items.ToDictionary(m => m.Id);
         return mediaIds.Distinct().Where(itemsById.ContainsKey).Select(id => itemsById[id]).ToList();
+    }
+
+    private static void ScopeRatingsToUser(BaseMedia media, Guid? userId)
+    {
+        IEnumerable<BaseRating> scoped = media.Ratings;
+        if (userId is { } uid)
+            scoped = scoped.Where(r => r is not UserRating ur || ur.UserId == uid);
+        else
+            scoped = scoped.Where(r => r is not UserRating);
+
+        media.Ratings = scoped.ToList();
     }
 
     private static MetadataPictureDto MapPicture(

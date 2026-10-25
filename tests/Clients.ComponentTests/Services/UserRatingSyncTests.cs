@@ -71,4 +71,16 @@ public class UserRatingSyncTests
         sync.TryGet(Guid.NewGuid(), out var value).Should().BeFalse();
         value.Should().BeNull();
     }
+
+    [Test]
+    public void GetPositivelyRatedMediaIds_ShouldReturnOnlyPositiveValues()
+    {
+        var sync = new UserRatingSync([]);
+        var kept = Guid.NewGuid();
+        var cleared = Guid.NewGuid();
+        sync.Set(kept, 7);
+        sync.Set(cleared, 0);
+
+        sync.GetPositivelyRatedMediaIds().Should().Equal(kept);
+    }
 }

@@ -12,4 +12,7 @@ public interface IUserRatingSync
     void Set(Guid mediaId, int? value);
 
     void Clear();
+
+    /// <summary>Media ids with a positive in-session rating (including offline / not yet flushed).</summary>
+    IReadOnlyList<Guid> GetPositivelyRatedMediaIds();
 }

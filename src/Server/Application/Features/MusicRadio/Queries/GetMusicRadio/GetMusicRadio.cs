@@ -335,8 +335,9 @@ public class GetMusicRadioQueryHandler(
 
         var uid = userId.Value;
         var ratedMediaIds = await GetUserRatedMediaIdsAsync(uid, ct);
+        var unratedQuery = WhereNotRatedByUser(baseQuery, uid);
 
-        var neverPlayedIds = await WhereNotRatedByUser(baseQuery, ratedMediaIds)
+        var neverPlayedIds = await unratedQuery
             .Where(t => !t.UserMediaStates.Any(s => s.UserId == uid && s.PlayCount > 0))
             .OrderBy(_ => EF.Functions.Random())
             .Select(t => t.Id)
@@ -347,7 +348,7 @@ public class GetMusicRadioQueryHandler(
         if (neverPlayedIds.Count < limit)
         {
             var existing = neverPlayedIds.ToHashSet();
-            var neverRatedIds = await WhereNotRatedByUser(baseQuery, ratedMediaIds)
+            var neverRatedIds = await WhereNotRatedByUser(baseQuery, uid)
                 .Where(t => !existing.Contains(t.Id))
                 .OrderBy(_ => EF.Functions.Random())
                 .Select(t => t.Id)
@@ -421,11 +422,25 @@ public class GetMusicRadioQueryHandler(
         if (candidateIds.Count == 0)
             return [];
 
-        var tracks = await LoadTracksByIdsAsync(candidateIds, userId, libraryIds, ct);
         HashSet<Guid>? ratedMediaIds = null;
         if (userId is { } uid)
+        {
             ratedMediaIds = await GetUserRatedMediaIdsAsync(uid, ct);
+            // Push rating exclusion to SQL before load so AudioMuse neighbors that are
+            // already rated (track, album, or artist) never reach the queue mapper.
+            var candidateSet = candidateIds.ToHashSet();
+            var unratedIds = await WhereNotRatedByUser(
+                    BuildLightTrackIdQuery(userId, libraryIds).Where(t => candidateSet.Contains(t.Id)),
+                    uid)
+                .Select(t => t.Id)
+                .ToListAsync(ct);
+            var unratedSet = unratedIds.ToHashSet();
+            candidateIds = candidateIds.Where(unratedSet.Contains).ToList();
+            if (candidateIds.Count == 0)
+                return [];
+        }
 
+        var tracks = await LoadTracksByIdsAsync(candidateIds, userId, libraryIds, ct);
         return FilterUnexploredTracks(tracks, candidateIds, userId, limit, ratedMediaIds);
     }
 
@@ -655,10 +670,14 @@ public class GetMusicRadioQueryHandler(
         return ids.ToHashSet();
     }
 
-    private static IQueryable<MusicTrack> WhereNotRatedByUser(
-        IQueryable<MusicTrack> query,
-        HashSet<Guid> ratedMediaIds) =>
-        query.Where(t => !ratedMediaIds.Contains(t.Id) && !ratedMediaIds.Contains(t.AlbumId));
+    private IQueryable<MusicTrack> WhereNotRatedByUser(IQueryable<MusicTrack> query, Guid userId) =>
+        query.Where(t => !context.Ratings.OfType<UserRating>().Any(r =>
+            r.UserId == userId
+            && r.Value > 0
+            && (r.MediaId == t.Id
+                || r.MediaId == t.AlbumId
+                || (t.ArtistId != null && r.MediaId == t.ArtistId)
+                || (t.Album.ArtistId != null && r.MediaId == t.Album.ArtistId))));
 
     private IQueryable<MusicTrack> ApplyLibraryFilter(IQueryable<MusicTrack> query, Guid[]? libraryIds) =>
         libraryIds is not { Length: > 0 }
@@ -729,10 +748,20 @@ public class GetMusicRadioQueryHandler(
     private static bool HasUserRating(MusicTrack track, Guid userId, IReadOnlySet<Guid>? ratedMediaIds)
     {
         if (ratedMediaIds is not null)
-            return ratedMediaIds.Contains(track.Id) || ratedMediaIds.Contains(track.AlbumId);
+        {
+            if (ratedMediaIds.Contains(track.Id) || ratedMediaIds.Contains(track.AlbumId))
+                return true;
+            if (track.ArtistId is { } artistId && ratedMediaIds.Contains(artistId))
+                return true;
+            if (track.Album?.ArtistId is { } albumArtistId && ratedMediaIds.Contains(albumArtistId))
+                return true;
+            return false;
+        }
 
         return track.Ratings.OfType<UserRating>().Any(r => r.UserId == userId && r.Value > 0)
-            || (track.Album?.Ratings.OfType<UserRating>().Any(r => r.UserId == userId && r.Value > 0) ?? false);
+            || (track.Album?.Ratings.OfType<UserRating>().Any(r => r.UserId == userId && r.Value > 0) ?? false)
+            || (track.Artist?.Ratings.OfType<UserRating>().Any(r => r.UserId == userId && r.Value > 0) ?? false)
+            || (track.Album?.Artist?.Ratings.OfType<UserRating>().Any(r => r.UserId == userId && r.Value > 0) ?? false);
     }
 
     private static List<Guid> InterleaveArtistRadio(

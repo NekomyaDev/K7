@@ -192,6 +192,30 @@ public class MediaMappingsTests
     }
 
     [Test]
+    public void ToLiteMediaDto_ShouldIgnoreZeroUserRating()
+    {
+        var track = new MusicTrack
+        {
+            Id = Guid.NewGuid(),
+            Title = "Track",
+            SortTitle = "Track",
+            AlbumId = Guid.NewGuid()
+        };
+        track.Ratings.Add(new UserRating
+        {
+            UserId = Guid.NewGuid(),
+            MediaId = track.Id,
+            Value = 0,
+            MinimumValue = 0,
+            MaximumValue = 10
+        });
+
+        var dto = (LiteMusicTrackDto)track.ToLiteMediaDto();
+
+        dto.UserRating.Should().BeNull();
+    }
+
+    [Test]
     public void ToMediaDto_ShouldOverlayItemBookmarkResumePosition()
     {
         var episodeId = Guid.NewGuid();

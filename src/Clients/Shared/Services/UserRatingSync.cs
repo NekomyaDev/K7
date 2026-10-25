@@ -48,6 +48,17 @@ public sealed class UserRatingSync : IUserRatingSync, IDisposable
             _ratings.Clear();
     }
 
+    public IReadOnlyList<Guid> GetPositivelyRatedMediaIds()
+    {
+        lock (_lock)
+        {
+            return _ratings
+                .Where(kv => kv.Value is > 0)
+                .Select(kv => kv.Key)
+                .ToList();
+        }
+    }
+
     public void Dispose()
     {
         if (_hub is null)
