@@ -140,6 +140,20 @@ Symptom in logs: `AntiforgeryOptions.Cookie.SecurePolicy = Always, but the curre
 - Local HTTP (`http://localhost:7080`): set `Security__ForceHttps=false` (sample compose already does)
 - Behind a TLS reverse proxy: keep `Security__ForceHttps=true` and ensure the proxy sends `X-Forwarded-Proto: https` (private networks are trusted by default; set `Security__KnownProxies` only to override)
 
+### Android native login 500 with MFA: invalid anti-forgery token
+
+Symptom in logs on `POST /sign-in` (or `/sign-in/two-factor`):
+
+`This form is being accessed with an invalid anti-forgery token` then often
+`ExceptionHandlerOptions produced a 404 status response` and HTTP 500.
+
+Browser and Windows app work. Android Custom Tabs fail. Deleting the device or reinstalling the app does not help (failure is during the browser sign-in before tokens exist).
+
+- Server should not turn that into 500 (auth-flow logging must not read an invalid form, and the exception handler recovers with a sign-in reload)
+- Antiforgery cookie uses `SameSite=Lax` so Custom Tabs can keep the token across the authorize to sign-in hop
+- Auth SSR pages omit `blazor.web.js` (plain HTML forms only)
+- Confirm `Paths:Config` / `dataprotection-keys` is on a persistent volume if cookies also fail after container recreate
+
 ### HTTPS redirect loops
 
 - Behind a proxy: ensure `X-Forwarded-Proto` is `https` (and that `TrustPrivateProxies` is true, or set `KnownProxies`)

@@ -49,18 +49,17 @@
     <link rel="stylesheet" href="@Assets["_content/K7.Clients.Shared.UI/app.css"]" />
     <link rel="stylesheet" href="@Assets["K7.Server.Web.styles.css"]" />
     <link rel="stylesheet" href="@Assets["css/auth.css"]" />
-    <link rel="stylesheet" href="@Assets["_content/K7.Clients.Shared.UI/dist/video.js/video-js.min.css"]" />
+    @if (PageRenderMode is not null)
+    {
+        <link rel="stylesheet" href="@Assets["_content/K7.Clients.Shared.UI/dist/video.js/video-js.min.css"]" />
+        <link rel="modulepreload" href="@Assets["_content/K7.Clients.Shared.UI/js/carousel.js"]" />
+        <link rel="modulepreload" href="@Assets["_content/K7.Clients.Shared.UI/js/home-restore.js"]" />
+        <link rel="modulepreload" href="@Assets["_content/K7.Clients.Shared.UI/js/vertical-carousel.js"]" />
+    }
     <ImportMap />
-    <link rel="modulepreload" href="@Assets["_content/K7.Clients.Shared.UI/js/carousel.js"]" />
-    <link rel="modulepreload" href="@Assets["_content/K7.Clients.Shared.UI/js/home-restore.js"]" />
-    <link rel="modulepreload" href="@Assets["_content/K7.Clients.Shared.UI/js/vertical-carousel.js"]" />
     <link rel="icon" type="image/png" sizes="512x512" href="@Assets[LinkPreviewUrls.IconAsset]" />
     <link rel="icon" type="image/svg+xml" href="@Assets["_content/K7.Clients.Shared.UI/assets/favicon.svg"]" />
     <link rel="apple-touch-icon" href="@Assets[LinkPreviewUrls.IconAsset]" />
-    @if (IsAuthSsrPath)
-    {
-        <link rel="modulepreload" href="@Assets["_framework/blazor.web.js"]" />
-    }
     <HeadOutlet @rendermode="PageRenderMode" />
 </head>
 
@@ -75,42 +74,47 @@
     }
     <Routes @rendermode="PageRenderMode" />
 
-    <script src="@Assets["_content/K7.Clients.Shared.UI/dist/lottie/build/player/lottie_light.min.js"]"></script>
-    <script src="@Assets["_content/K7.Clients.Shared.UI/js/lottie-interop.js"]"></script>
-    <script>
-        var preload = document.getElementById('preload-animation');
-        if (preload) {
-            K7.Lottie.play(preload, '_content/K7.Clients.Shared.UI/animations/splash.json');
-        }
-    </script>
-    <script src="@Assets["_framework/blazor.web.js"]"></script>
-    <script>K7.Lottie.preload('_content/K7.Clients.Shared.UI/animations/splash.json');</script>
-    <script src="@Assets["_content/K7.Clients.Shared.UI/dist/embla-carousel/embla-carousel.umd.js"]"></script>
-    <script src="@Assets["_content/K7.Clients.Shared.UI/lib/js-spatial-navigation/spatial_navigation.js"]"></script>
-    <script src="@Assets["_content/K7.Clients.Shared.UI/js/navigation.js"]"></script>
-    <script src="@Assets["_content/K7.Clients.Shared.UI/dist/qrcodejs/qrcode.min.js"]"></script>
-    <script src="@Assets["_content/K7.Clients.Shared.UI/js/qrcode.js"]"></script>
-    <script src="@Assets["_content/K7.Clients.Shared.UI/js/ambientTheme.js"]"></script>
-    <script src="@Assets["dist/bowser/es5.min.js"]"></script>
-    <script src="@Assets["_content/K7.Clients.Shared.UI/dist/video.js/video.min.js"]"></script>
-    <script src="@Assets["_content/K7.Clients.Shared.UI/js/videoplayer.js"]"></script>
-    <script src="@Assets["_content/K7.Clients.Shared.UI/js/audioplayer.js"]"></script>
-    <script src="@Assets["_content/K7.Clients.Shared.UI/js/deviceCapabilities.js"]"></script>
-    <script src="@Assets["js/deviceUtils.js"]"></script>
-    <script src="@Assets["js/castplayer.js"]"></script>
-    <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
-    <script>
-        window.blazorCulture = {
-            getSaved: () => window.localStorage.getItem('BlazorCulture'),
-            get: () => window.localStorage.getItem('BlazorCulture')
-                || window.__K7_DEFAULT_LANGUAGE__
-                || 'en',
-            set: (value) => {
-                window.localStorage.setItem('BlazorCulture', value);
-                document.cookie = `.AspNetCore.Culture=c=${value}|uic=${value};path=/;max-age=31536000;samesite=lax`;
+    @* Auth SSR (sign-in / 2FA / setup): plain HTML forms only. Loading blazor.web.js
+       on those pages has caused empty antiforgery 400/500 in Android Custom Tabs. *@
+    @if (PageRenderMode is not null)
+    {
+        <script src="@Assets["_content/K7.Clients.Shared.UI/dist/lottie/build/player/lottie_light.min.js"]"></script>
+        <script src="@Assets["_content/K7.Clients.Shared.UI/js/lottie-interop.js"]"></script>
+        <script>
+            var preload = document.getElementById('preload-animation');
+            if (preload) {
+                K7.Lottie.play(preload, '_content/K7.Clients.Shared.UI/animations/splash.json');
             }
-        };
-    </script>
+        </script>
+        <script src="@Assets["_framework/blazor.web.js"]"></script>
+        <script>K7.Lottie.preload('_content/K7.Clients.Shared.UI/animations/splash.json');</script>
+        <script src="@Assets["_content/K7.Clients.Shared.UI/dist/embla-carousel/embla-carousel.umd.js"]"></script>
+        <script src="@Assets["_content/K7.Clients.Shared.UI/lib/js-spatial-navigation/spatial_navigation.js"]"></script>
+        <script src="@Assets["_content/K7.Clients.Shared.UI/js/navigation.js"]"></script>
+        <script src="@Assets["_content/K7.Clients.Shared.UI/dist/qrcodejs/qrcode.min.js"]"></script>
+        <script src="@Assets["_content/K7.Clients.Shared.UI/js/qrcode.js"]"></script>
+        <script src="@Assets["_content/K7.Clients.Shared.UI/js/ambientTheme.js"]"></script>
+        <script src="@Assets["dist/bowser/es5.min.js"]"></script>
+        <script src="@Assets["_content/K7.Clients.Shared.UI/dist/video.js/video.min.js"]"></script>
+        <script src="@Assets["_content/K7.Clients.Shared.UI/js/videoplayer.js"]"></script>
+        <script src="@Assets["_content/K7.Clients.Shared.UI/js/audioplayer.js"]"></script>
+        <script src="@Assets["_content/K7.Clients.Shared.UI/js/deviceCapabilities.js"]"></script>
+        <script src="@Assets["js/deviceUtils.js"]"></script>
+        <script src="@Assets["js/castplayer.js"]"></script>
+        <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
+        <script>
+            window.blazorCulture = {
+                getSaved: () => window.localStorage.getItem('BlazorCulture'),
+                get: () => window.localStorage.getItem('BlazorCulture')
+                    || window.__K7_DEFAULT_LANGUAGE__
+                    || 'en',
+                set: (value) => {
+                    window.localStorage.setItem('BlazorCulture', value);
+                    document.cookie = `.AspNetCore.Culture=c=${value}|uic=${value};path=/;max-age=31536000;samesite=lax`;
+                }
+            };
+        </script>
+    }
 </body>
 
 </html>

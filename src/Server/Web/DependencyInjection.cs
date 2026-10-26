@@ -42,7 +42,10 @@ public static class DependencyInjection
         {
             options.HeaderName = "X-XSRF-TOKEN";
             options.Cookie.Name = forceHttps ? "__Host-X-XSRF-TOKEN" : ".K7.Antiforgery";
-            options.Cookie.SameSite = SameSiteMode.Strict;
+            // Lax: Android Chrome Custom Tabs open authorize as a cross-site top-level
+            // navigation from the app. Strict can drop the antiforgery cookie on the
+            // subsequent sign-in / 2FA POSTs and surface as HTTP 500.
+            options.Cookie.SameSite = SameSiteMode.Lax;
             options.Cookie.SecurePolicy = cookieSecurePolicy;
         });
 

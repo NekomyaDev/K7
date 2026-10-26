@@ -29,6 +29,12 @@ public class CustomExceptionHandler : IExceptionHandler
 
     public async ValueTask<bool> TryHandleAsync(HttpContext httpContext, Exception exception, CancellationToken cancellationToken)
     {
+        if (IsAntiforgeryFormAccessException(exception))
+        {
+            await HandleAntiforgeryFormAccessException(httpContext, cancellationToken);
+            return true;
+        }
+
         var current = exception;
         while (current is not null)
         {
@@ -59,6 +65,56 @@ public class CustomExceptionHandler : IExceptionHandler
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Reading <c>Request.Form</c> after an invalid antiforgery verdict throws
+    /// <see cref="InvalidOperationException"/>. Prefer a recoverable response over
+    /// the empty exception-handler pipeline (which otherwise surfaces as 404/500).
+    /// </summary>
+    internal static bool IsAntiforgeryFormAccessException(Exception exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is not InvalidOperationException)
+                continue;
+
+            if (current.Message.Contains("anti-forgery token", StringComparison.OrdinalIgnoreCase)
+                || current.Message.Contains("IAntiforgeryValidationFeature", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static Task HandleAntiforgeryFormAccessException(HttpContext httpContext, CancellationToken cancellationToken)
+    {
+        var path = httpContext.Request.Path.Value ?? "/";
+        if (path.StartsWith("/api/", StringComparison.OrdinalIgnoreCase))
+        {
+            httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
+            return httpContext.Response.WriteAsJsonAsync(new ProblemDetails
+            {
+                Status = StatusCodes.Status400BadRequest,
+                Title = "Invalid anti-forgery token",
+                Type = "https://tools.ietf.org/html/rfc7231#section-6.5.1"
+            }, cancellationToken);
+        }
+
+        // Auth SSR forms (sign-in / 2FA): reload as GET so Custom Tabs get a fresh token.
+        if (!httpContext.Response.HasStarted
+            && (path.StartsWith("/sign-in", StringComparison.OrdinalIgnoreCase)
+                || path.StartsWith("/sign-up", StringComparison.OrdinalIgnoreCase)
+                || path.StartsWith("/setup", StringComparison.OrdinalIgnoreCase)
+                || path.StartsWith("/welcome", StringComparison.OrdinalIgnoreCase)))
+        {
+            var location = path + httpContext.Request.QueryString.Value;
+            httpContext.Response.Redirect(location);
+            return Task.CompletedTask;
+        }
+
+        httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
+        return Task.CompletedTask;
     }
 
     private static Task HandleValidationException(HttpContext httpContext, Exception ex, CancellationToken cancellationToken)

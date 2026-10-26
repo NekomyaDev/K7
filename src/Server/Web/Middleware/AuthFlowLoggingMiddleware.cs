@@ -1,4 +1,5 @@
 using K7.Server.Web.Components.Account;
+using Microsoft.AspNetCore.Antiforgery;
 
 namespace K7.Server.Web.Middleware;
 
@@ -13,6 +14,22 @@ public sealed class AuthFlowLoggingMiddleware(RequestDelegate next, ILogger<Auth
     {
         await next(context);
 
+        try
+        {
+            TryLog(context);
+        }
+        catch (Exception ex)
+        {
+            // Logging must never turn a completed auth response (including antiforgery 400)
+            // into an unhandled 500.
+            logger.LogWarning(ex, "Auth flow logging failed for {Method} {Path}",
+                context.Request.Method,
+                context.Request.Path.Value ?? "/");
+        }
+    }
+
+    private void TryLog(HttpContext context)
+    {
         if (!IsAuthPath(context.Request.Path))
             return;
 
@@ -66,6 +83,20 @@ public sealed class AuthFlowLoggingMiddleware(RequestDelegate next, ILogger<Auth
         return ReadFormValue(request, key);
     }
 
+    internal static bool CanReadForm(HttpRequest request)
+    {
+        if (!request.HasFormContentType)
+            return false;
+
+        // ASP.NET throws on Request.Form when antiforgery middleware recorded an
+        // invalid verdict. Check the feature before touching the form.
+        var antiforgery = request.HttpContext.Features.Get<IAntiforgeryValidationFeature>();
+        if (antiforgery is { IsValid: false })
+            return false;
+
+        return true;
+    }
+
     private static string ReadQueryValue(HttpRequest request, string key)
     {
         if (request.Query.TryGetValue(key, out var queryValue))
@@ -76,7 +107,7 @@ public sealed class AuthFlowLoggingMiddleware(RequestDelegate next, ILogger<Auth
 
     private static string ReadFormValue(HttpRequest request, string key)
     {
-        if (!request.HasFormContentType)
+        if (!CanReadForm(request))
             return "";
 
         try
