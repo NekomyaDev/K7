@@ -117,6 +117,8 @@ try
     app.UseAuthFlowLogging();
     app.UseNativeAuthorizationLanding();
     app.UseAntiforgery();
+    // After antiforgery: empty 400 on auth POSTs (token mismatch) -> GET reload.
+    app.UseAuthFormBadRequestRecovery();
     app.UseMiddleware<FederationGuardMiddleware>();
 
     app.MapEndpoints();

@@ -21,7 +21,8 @@
     </div>
     <div class="auth-card-body">
         <StatusMessage Message="@message" />
-        <EditForm Model="Input" FormName="login-with-2fa" OnValidSubmit="OnValidSubmitAsync" method="post" Enhance="false">
+        <EditForm Model="Input" FormName="login-with-2fa" OnValidSubmit="OnValidSubmitAsync" method="post" Enhance="false"
+                  action="@FormAction">
             <input type="hidden" name="ReturnUrl" value="@ReturnUrl" />
             <input type="hidden" name="RememberMe" value="@RememberMe" />
             <DataAnnotationsValidator />
@@ -63,6 +64,10 @@
     private string? ReturnUrlForm { get; set; }
 
     private string? ReturnUrl => IdentityRedirectUri.Coalesce(ReturnUrlForm, ReturnUrlQuery, HttpContext?.Request.Query);
+
+    private string FormAction => NavigationManager.GetUriWithQueryParameters(
+        "/sign-in/two-factor",
+        new Dictionary<string, object?> { ["ReturnUrl"] = ReturnUrl, ["rememberMe"] = RememberMe });
 
     [SupplyParameterFromQuery]
     private bool RememberMe { get; set; }

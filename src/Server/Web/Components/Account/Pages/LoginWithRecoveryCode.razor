@@ -21,7 +21,8 @@
     </div>
     <div class="auth-card-body">
         <StatusMessage Message="@message" />
-        <EditForm Model="Input" FormName="login-with-recovery-code" OnValidSubmit="OnValidSubmitAsync" method="post" Enhance="false">
+        <EditForm Model="Input" FormName="login-with-recovery-code" OnValidSubmit="OnValidSubmitAsync" method="post" Enhance="false"
+                  action="@FormAction">
             <input type="hidden" name="ReturnUrl" value="@ReturnUrl" />
             <input type="hidden" name="RememberMe" value="@RememberMe" />
             <DataAnnotationsValidator />
@@ -42,6 +43,9 @@
     private string? message;
     private ApplicationUser user = default!;
 
+    [Inject]
+    private NavigationManager NavigationManager { get; set; } = default!;
+
     [SupplyParameterFromForm]
     private InputModel? Input { get; set; }
 
@@ -52,6 +56,10 @@
     private string? ReturnUrlForm { get; set; }
 
     private string? ReturnUrl => IdentityRedirectUri.Coalesce(ReturnUrlForm, ReturnUrlQuery, HttpContext?.Request.Query);
+
+    private string FormAction => NavigationManager.GetUriWithQueryParameters(
+        "/sign-in/recovery-code",
+        new Dictionary<string, object?> { ["ReturnUrl"] = ReturnUrl, ["rememberMe"] = RememberMe });
 
     [SupplyParameterFromQuery]
     private bool RememberMe { get; set; }

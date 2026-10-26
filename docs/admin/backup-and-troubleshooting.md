@@ -150,8 +150,12 @@ Symptom in logs on `POST /sign-in` (or `/sign-in/two-factor`):
 Browser and Windows app work. Android Custom Tabs fail. Deleting the device or reinstalling the app does not help (failure is during the browser sign-in before tokens exist).
 
 - Server should not turn that into 500 (auth-flow logging must not read an invalid form, and the exception handler recovers with a sign-in reload)
-- Antiforgery cookie uses `SameSite=Lax` so Custom Tabs can keep the token across the authorize to sign-in hop
+- Empty antiforgery **400** on auth POSTs is converted to a GET reload (`AuthFormBadRequestRecovery`)
+- Antiforgery + Identity / 2FA cookies use `SameSite=Lax` so Custom Tabs keep them across authorize to sign-in
 - Auth SSR pages omit `blazor.web.js` (plain HTML forms only)
+- Confirm Android app Base URL is the same `https://` host as the working browser login
+- Confirm reverse proxy sends `X-Forwarded-Proto: https` when `Security__ForceHttps=true`
+- Auth logs include `antiforgery ok|invalid` and `https True|False` on the failing POST
 - Confirm `Paths:Config` / `dataprotection-keys` is on a persistent volume if cookies also fail after container recreate
 
 ### HTTPS redirect loops

@@ -29,7 +29,8 @@
     <div class="auth-card-body">
         @if (_auth.Local.SignInEnabled)
         {
-            <EditForm Model="Input" method="post" OnValidSubmit="LoginUser" FormName="login" Enhance="false">
+            <EditForm Model="Input" method="post" OnValidSubmit="LoginUser" FormName="login" Enhance="false"
+                      action="@FormAction">
                 <input type="hidden" name="ReturnUrl" value="@ReturnUrl" />
                 <DataAnnotationsValidator />
                 <div class="auth-form-stack">
@@ -115,6 +116,11 @@
     private string? ReturnUrlForm { get; set; }
 
     private string? ReturnUrl => IdentityRedirectUri.Coalesce(ReturnUrlForm, ReturnUrlQuery, HttpContext?.Request.Query);
+
+    // Keep ReturnUrl on the POST URL so empty-400 recovery can reload without losing authorize.
+    private string FormAction => string.IsNullOrEmpty(ReturnUrl)
+        ? "/sign-in"
+        : NavigationManager.GetUriWithQueryParameters("/sign-in", new Dictionary<string, object?> { ["ReturnUrl"] = ReturnUrl });
 
     [SupplyParameterFromQuery]
     private string? Error { get; set; }

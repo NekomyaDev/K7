@@ -144,5 +144,9 @@ internal static class ApplicationCookieOptions
         options.Cookie.HttpOnly = true;
         options.Cookie.SecurePolicy = cookieSecurePolicy;
         options.Cookie.IsEssential = true;
+        // Lax: Android Chrome Custom Tabs open authorize as a cross-site top-level
+        // navigation. Unspecified/Strict can drop the Identity / 2FA cookies so MFA
+        // POSTs hit "No two-factor authentication user found".
+        options.Cookie.SameSite = SameSiteMode.Lax;
     }
 }

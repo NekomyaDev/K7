@@ -38,9 +38,13 @@ public sealed class AuthFlowLoggingMiddleware(RequestDelegate next, ILogger<Auth
         var redirectUri = ReadValue(context.Request, "redirect_uri");
         var clientId = ReadValue(context.Request, "client_id");
         var grantType = ReadValue(context.Request, "grant_type");
+        var antiforgery = context.Features.Get<IAntiforgeryValidationFeature>();
+        var antiforgeryKind = antiforgery is null
+            ? "-"
+            : antiforgery.IsValid ? "ok" : "invalid";
 
         logger.LogInformation(
-            "Auth {Method} {Path} {StatusCode} cookie {CookieAuth} returnUrl {ReturnUrlKind} location {LocationKind} client {ClientId} grant {GrantType} redirectHost {RedirectHost} locationHost {LocationHost}",
+            "Auth {Method} {Path} {StatusCode} cookie {CookieAuth} returnUrl {ReturnUrlKind} location {LocationKind} client {ClientId} grant {GrantType} redirectHost {RedirectHost} locationHost {LocationHost} antiforgery {Antiforgery} https {IsHttps}",
             context.Request.Method,
             context.Request.Path.Value ?? "/",
             context.Response.StatusCode,
@@ -50,7 +54,9 @@ public sealed class AuthFlowLoggingMiddleware(RequestDelegate next, ILogger<Auth
             string.IsNullOrEmpty(clientId) ? "-" : clientId,
             string.IsNullOrEmpty(grantType) ? "-" : grantType,
             IdentityRedirectUri.DescribeHost(redirectUri),
-            IdentityRedirectUri.DescribeHost(string.IsNullOrEmpty(location) ? null : location));
+            IdentityRedirectUri.DescribeHost(string.IsNullOrEmpty(location) ? null : location),
+            antiforgeryKind,
+            context.Request.IsHttps);
     }
 
     internal static bool IsAuthPath(PathString path) =>
@@ -85,16 +91,20 @@ public sealed class AuthFlowLoggingMiddleware(RequestDelegate next, ILogger<Auth
 
     internal static bool CanReadForm(HttpRequest request)
     {
-        if (!request.HasFormContentType)
-            return false;
-
-        // ASP.NET throws on Request.Form when antiforgery middleware recorded an
-        // invalid verdict. Check the feature before touching the form.
+        // Check the feature first: in current ASP.NET, even HasFormContentType
+        // can throw when the antiforgery verdict is invalid.
         var antiforgery = request.HttpContext.Features.Get<IAntiforgeryValidationFeature>();
         if (antiforgery is { IsValid: false })
             return false;
 
-        return true;
+        try
+        {
+            return request.HasFormContentType;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
     }
 
     private static string ReadQueryValue(HttpRequest request, string key)
