@@ -41,6 +41,8 @@ public static partial class MauiProgram
 {
     public static MauiApp CreateMauiApp()
     {
+        MauiStartupTrace.Mark("CreateMauiApp-start");
+        ColdStartTrace.Mark = MauiStartupTrace.Mark;
 #if LINUX
         // Static Essentials (Preferences, FileSystem, DeviceInfo) must work before DI exists.
         LinuxEssentialsDefaults.ApplyEarly();
@@ -331,7 +333,9 @@ public static partial class MauiProgram
         builder.Services.AddSingleton<IFeatureAccessService, FeatureAccessService>();
 
         System.Diagnostics.Debug.WriteLine("K7 MAUI - Calling builder.Build()");
+        MauiStartupTrace.Mark("builder.Build-start");
         var app = builder.Build();
+        MauiStartupTrace.Mark("builder.Build-end");
         NativeAuthTrace.Configure(app.Services);
 #if WINDOWS
         WindowsProtocolActivation.Attach();
@@ -362,6 +366,7 @@ public static partial class MauiProgram
         });
 
         System.Diagnostics.Debug.WriteLine("K7 MAUI - CreateMauiApp returning");
+        MauiStartupTrace.Mark("CreateMauiApp-end");
         return app;
     }
 

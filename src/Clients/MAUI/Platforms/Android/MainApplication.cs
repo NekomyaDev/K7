@@ -47,5 +47,11 @@ public class MainApplication : MauiApplication
         }
     }
 
-    protected override MauiApp CreateMauiApp() => MauiProgram.CreateMauiApp();
+    protected override MauiApp CreateMauiApp()
+    {
+        MauiStartupTrace.Mark("MainApplication.CreateMauiApp");
+        MauiStartupTrace.MarkEnvironment();
+        MauiStartupTrace.StartMainThreadWatchdog();
+        return MauiProgram.CreateMauiApp();
+    }
 }

@@ -49,6 +49,7 @@ public partial class MainLayout : IDisposable
 
     protected override void OnInitialized()
     {
+        ColdStartTrace.Write("MainLayout-init");
         var lastUserId = Services.GetRequiredService<IDeviceStorageService>().Get(PreferenceKeys.LAST_ACTIVE_USER_ID);
         if (!string.IsNullOrEmpty(lastUserId))
             CustomNavStore.BindUser(lastUserId);
@@ -229,6 +230,7 @@ public partial class MainLayout : IDisposable
     {
         if (firstRender)
         {
+            ColdStartTrace.Write("MainLayout-firstRender");
             AppReadySignal.Signal();
             PlaybackAssetLoader.Prefetch(JS);
             await JS.InvokeVoidAsync("K7.applyTheme", ThemeService.Theme.CssDataAttribute);

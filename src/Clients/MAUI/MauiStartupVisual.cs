@@ -17,10 +17,15 @@ internal static class MauiStartupVisual
             return;
 
         IsFirstFrameReady = true;
+        MauiStartupTrace.Mark("FirstFrame-notified");
         FirstFrameReady?.Invoke();
     }
 
-    public static void NotifyStartPageSet() => StartPageSet?.Invoke();
+    public static void NotifyStartPageSet()
+    {
+        MauiStartupTrace.Mark("StartPageSet-notified");
+        StartPageSet?.Invoke();
+    }
 
     public static void Reset() => IsFirstFrameReady = false;
 }

@@ -104,10 +104,12 @@ public class CustomAuthenticationStateProvider : AuthenticationStateProvider, IC
     /// </summary>
     public async Task EnsureReadyForHeadlessPlaybackAsync(CancellationToken cancellationToken = default)
     {
+        MauiStartupTrace.MarkRepeat("Headless-auth-start");
         await WaitForNetworkHintAsync(cancellationToken);
 
         for (var attempt = 0; attempt < MauiSessionRestore.HeadlessRestoreMaxAttempts; attempt++)
         {
+            MauiStartupTrace.MarkRepeat("Headless-attempt");
             AllowRestoreRetryIfNeeded();
             await GetAuthenticationStateAsync();
 
@@ -424,6 +426,7 @@ public class CustomAuthenticationStateProvider : AuthenticationStateProvider, IC
         {
             // Yield so CreateWindow is not blocked on SecureStorage during the sync prefix.
             await Task.Yield();
+            MauiStartupTrace.MarkRepeat("AuthRestore-start");
             if (_k7ServerService.HttpClient.BaseAddress is null)
             {
                 // CreateWindow / Android Auto may apply the URL a moment later. Do not
@@ -442,6 +445,7 @@ public class CustomAuthenticationStateProvider : AuthenticationStateProvider, IC
         finally
         {
             RestoreOnCallStack.Value = false;
+            MauiStartupTrace.MarkRepeat("AuthRestore-end");
         }
     }
 
@@ -508,11 +512,14 @@ public class CustomAuthenticationStateProvider : AuthenticationStateProvider, IC
     {
         var refreshToken = _deviceStorageService.Get(PreferenceKeys.REFRESH_TOKEN) ?? localUser.RefreshToken;
 
+        MauiStartupTrace.MarkRepeat("AuthRestore-refresh-start");
         var outcome = await TryRefreshTokenAsync(refreshToken);
+        MauiStartupTrace.MarkRepeat("AuthRestore-refresh-end");
         if (outcome == RefreshOutcome.Success)
         {
             await SaveLocalUserFromCurrentUserAsync();
             await RestoreSharedProfileAsync();
+            MauiStartupTrace.MarkRepeat("AuthRestore-shared-profile");
             NotifyAuthenticationStateChanged(
                 Task.FromResult(new AuthenticationState(_currentUser)));
             return;

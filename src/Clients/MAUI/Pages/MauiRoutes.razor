@@ -28,4 +28,14 @@
 
 @code {
     private static readonly Assembly[] _sharedAssemblies = [typeof(ISharedPagesPointer).Assembly];
+
+    // Cold-start trace: root component init (Blazor attached) and first batch ack.
+    protected override void OnInitialized() =>
+        K7.Clients.MAUI.MauiStartupTrace.Mark("MauiRoutes-init");
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender)
+            K7.Clients.MAUI.MauiStartupTrace.Mark("MauiRoutes-firstRender");
+    }
 }

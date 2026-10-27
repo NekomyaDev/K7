@@ -24,6 +24,7 @@ internal static class MauiSessionBootstrap
             return;
 
         var manager = services.GetService<K7ServerManagerService>();
+        MauiStartupTrace.Mark("ServerUrl-manager-resolved");
         if (manager is null)
             return;
 
@@ -31,6 +32,7 @@ internal static class MauiSessionBootstrap
         {
             manager.UpdateBaseAddress(k7ServerUrl);
             manager.EnsureOpenIddictRegistration(k7ServerUrl);
+            MauiStartupTrace.Mark("ServerUrl-registration-end");
         }
         catch (Exception ex)
         {
@@ -62,6 +64,7 @@ internal static class MauiSessionBootstrap
             await custom.EnsureReadyForHeadlessPlaybackAsync(cancellationToken);
         else if (services.GetService<AuthenticationStateProvider>() is { } auth)
             await auth.GetAuthenticationStateAsync();
+        MauiStartupTrace.MarkRepeat("Headless-auth-done");
 
         services.GetService<AuthSessionKeeper>()?.OnAppResumed();
 
@@ -76,8 +79,10 @@ internal static class MauiSessionBootstrap
         var onlineUserId = AuthIdentity.IsOnlineAuthenticated(state.User) ? userId : null;
         if (onlineUserId is not null)
             await DeviceInitializer.InitializeDeviceAsync(services, onlineUserId);
+        MauiStartupTrace.MarkRepeat("Headless-device-done");
 
         await EnableHeadlessPlaybackReportingAsync(services, onlineUserId, cancellationToken);
+        MauiStartupTrace.MarkRepeat("Headless-reporting-done");
 
         if (userId is null)
             return;

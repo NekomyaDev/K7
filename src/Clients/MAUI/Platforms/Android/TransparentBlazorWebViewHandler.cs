@@ -9,16 +9,22 @@ public class TransparentBlazorWebViewHandler : BlazorWebViewHandler
 {
     protected override global::Android.Webkit.WebView CreatePlatformView()
     {
+        MauiStartupTrace.Mark("WebView-create-start");
         var platformView = base.CreatePlatformView();
+        MauiStartupTrace.Mark("WebView-create-end");
         // UA must be tagged before the first document load so tv-layout.js sees K7TV/.
         ApplyTvScalingIfNeeded(platformView);
+        // Before the first document load: index.html marks startup phases through it.
+        AttachStartupTraceBridge(platformView);
         return platformView;
     }
 
     protected override void ConnectHandler(global::Android.Webkit.WebView platformView)
     {
+        MauiStartupTrace.Mark("WebView-connect-start");
         ApplyTvScalingIfNeeded(platformView);
         base.ConnectHandler(platformView);
+        MauiStartupTrace.Mark("WebView-connect-base-end");
 
         AndroidWebViewAccessor.Current = platformView;
         // Brand dark default (not WebView white). Video open paints an opaque black ColorDrawable
@@ -52,6 +58,21 @@ public class TransparentBlazorWebViewHandler : BlazorWebViewHandler
 
         SetupSafeAreaInsets(platformView);
         AttachTvVideoBridges(platformView);
+        MauiStartupTrace.Mark("WebView-connect-end");
+    }
+
+    private static void AttachStartupTraceBridge(global::Android.Webkit.WebView webView)
+    {
+        try
+        {
+#pragma warning disable CA1416 // JavascriptInterface is API 17+; min SDK is 26
+            webView.AddJavascriptInterface(new StartupTraceJsBridge(), StartupTraceJsBridge.InterfaceName);
+#pragma warning restore CA1416
+        }
+        catch (Exception)
+        {
+            // Diagnostics only - never block WebView creation.
+        }
     }
 
     private static void AttachTvVideoBridges(global::Android.Webkit.WebView webView)

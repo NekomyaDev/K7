@@ -7,6 +7,20 @@
     <script>
         // MAUI WebView only - Web WASM never loads this index.html.
         document.documentElement.classList.add('platform-maui');
+
+        // Cold-start trace (logcat tag K7-Startup). K7StartupTrace is the Android JS bridge:
+        // same monotonic clock as the native markers. console.log is a second clock
+        // (logcat tag "chromium", ms since document start) and the only output elsewhere.
+        window.k7StartupMark = function (name) {
+            try {
+                if (window.K7StartupTrace && typeof K7StartupTrace.mark === 'function')
+                    K7StartupTrace.mark(name);
+            } catch (e) { }
+            try { console.log('K7-Startup js-' + name + ' +' + Math.round(performance.now()) + 'ms'); } catch (e) { }
+        };
+        k7StartupMark('head-start');
+        document.addEventListener('DOMContentLoaded', function () { k7StartupMark('dom-content-loaded'); });
+        window.addEventListener('load', function () { k7StartupMark('window-load'); });
     </script>
     <script src="_content/K7.Clients.Shared.UI/js/tv-layout.js"></script>
     <title>K7</title>
@@ -20,9 +34,11 @@
 
     <script src="_content/K7.Clients.Shared.UI/js/theme.js"></script>
     <script src="_content/K7.Clients.Shared.UI/js/deviceCapabilities.js"></script>
+    <script>k7StartupMark('head-end');</script>
 </head>
 
 <body>
+    <script>k7StartupMark('body-start');</script>
     <div class="status-bar-safe-area"></div>
     <div id="app">
         <div id="preload">
@@ -34,6 +50,63 @@
 
 
     <script src="_framework/blazor.webview.js" autostart="false"></script>
+    <script>
+        // Cold-start trace. The MAUI host calls Blazor.start() after page load, once
+        // window.external exists. Wrap the IPC so the first message in each direction and the
+        // first render batch are timed, and watch #app for the first DOM change (batch applied).
+        (function () {
+            k7StartupMark('blazor-script-loaded');
+            var app = document.getElementById('app');
+            if (app && window.MutationObserver) {
+                var observer = new MutationObserver(function () {
+                    observer.disconnect();
+                    k7StartupMark('first-dom-mutation');
+                    window.requestAnimationFrame(function () { k7StartupMark('first-frame-after-mutation'); });
+                });
+                observer.observe(app, { childList: true });
+            }
+            if (window.K7 && typeof K7.dismissPreload === 'function') {
+                var dismiss = K7.dismissPreload;
+                K7.dismissPreload = function () {
+                    k7StartupMark('dismiss-preload');
+                    return dismiss.apply(this, arguments);
+                };
+            }
+            if (!window.Blazor || typeof Blazor.start !== 'function')
+                return;
+            var start = Blazor.start;
+            Blazor.start = function () {
+                k7StartupMark('blazor-start');
+                try {
+                    var sentFirst = false, sentRenderCompleted = false;
+                    if (window.external && typeof window.external.sendMessage === 'function') {
+                        var send = window.external.sendMessage;
+                        window.external.sendMessage = function (message) {
+                            if (!sentFirst) { sentFirst = true; k7StartupMark('first-message-to-dotnet'); }
+                            if (!sentRenderCompleted && typeof message === 'string' && message.indexOf('OnRenderCompleted') !== -1) {
+                                sentRenderCompleted = true;
+                                k7StartupMark('first-render-completed-sent');
+                            }
+                            return send.apply(this, arguments);
+                        };
+                    }
+                    var receivedFirst = false, receivedBatch = false;
+                    var dispatch = window.__dispatchMessageCallback;
+                    if (typeof dispatch === 'function') {
+                        window.__dispatchMessageCallback = function (message) {
+                            if (!receivedFirst) { receivedFirst = true; k7StartupMark('first-message-from-dotnet'); }
+                            if (!receivedBatch && typeof message === 'string' && message.indexOf('RenderBatch') !== -1) {
+                                receivedBatch = true;
+                                k7StartupMark('first-render-batch-received');
+                            }
+                            return dispatch.apply(this, arguments);
+                        };
+                    }
+                } catch (e) { }
+                return start.apply(this, arguments);
+            };
+        })();
+    </script>
     <script src="_content/K7.Clients.Shared.UI/js/lottie-interop.js"></script>
     <script src="_content/K7.Clients.Shared.UI/dist/embla-carousel/embla-carousel.umd.js"></script>
     <script src="_content/K7.Clients.Shared.UI/lib/js-spatial-navigation/spatial_navigation.js"></script>

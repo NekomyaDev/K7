@@ -76,6 +76,7 @@ public sealed class K7HubClient(ILogger<K7HubClient> logger) : IAsyncDisposable,
     {
         if (string.IsNullOrEmpty(userId)) return;
 
+        ColdStartTrace.Write("Hub-ensure-start");
         if (!string.IsNullOrEmpty(accessToken))
             _accessToken = accessToken;
 
@@ -336,8 +337,10 @@ public sealed class K7HubClient(ILogger<K7HubClient> logger) : IAsyncDisposable,
             });
 
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            ColdStartTrace.Write("Hub-connect-start");
             await _hubConnection.StartAsync(cts.Token);
             _started = true;
+            ColdStartTrace.Write("Hub-connected");
             await RejoinGroupsAsync();
             ConnectionStateChanged?.Invoke(HubConnectionState.Connected);
         }

@@ -94,9 +94,11 @@ public class K7MediaLibraryService : MediaLibraryService,
 
     public override void OnCreate()
     {
+        MauiStartupTrace.Mark("MediaLibrary-OnCreate-start");
         base.OnCreate();
         Log.Info(Tag, "K7MediaLibraryService created");
         TryInitializeService();
+        MauiStartupTrace.Mark("MediaLibrary-OnCreate-end");
     }
 
     public override MediaLibrarySession? OnGetSessionFromMediaLibraryService(
@@ -152,11 +154,13 @@ public class K7MediaLibraryService : MediaLibraryService,
         _connectivity = services.GetRequiredService<IConnectivityService>();
         _localUsers = services.GetRequiredService<ILocalUserService>();
         _localizer = services.GetRequiredService<IStringLocalizer<MediaBrowseService>>();
+        MauiStartupTrace.Mark("MediaLibrary-services-resolved");
 
         // Service may start from Android Auto before App.CreateWindow applies the URL.
         EnsureServerBaseAddress();
         SubscribeToAuthEvents(services);
         _headlessReady = PrepareHeadlessSessionAsync();
+        MauiStartupTrace.Mark("MediaLibrary-base-address");
 
         _httpDataSourceFactory = new DefaultHttpDataSource.Factory();
         UpdateAuthHeaders();
@@ -172,6 +176,7 @@ public class K7MediaLibraryService : MediaLibraryService,
 
         _player = CreateExoPlayer(handleAudioFocus: true);
         _crossfadePlayer = CreateExoPlayer(handleAudioFocus: false);
+        MauiStartupTrace.Mark("MediaLibrary-players-created");
 
         _player.AddListener(this);
 
@@ -210,6 +215,7 @@ public class K7MediaLibraryService : MediaLibraryService,
             .SetSessionActivity(pendingIntent)!
             .SetId("k7_video")!
             .Build()!;
+        MauiStartupTrace.Mark("MediaLibrary-sessions-built");
 
         // Explicitly register the session with the base MediaSessionService so
         // the notification manager observes player state changes. Without this,

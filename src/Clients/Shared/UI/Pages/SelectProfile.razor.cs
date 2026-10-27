@@ -1,6 +1,7 @@
 using System.Net.Http;
 using K7.Clients.Shared.Interfaces;
 using K7.Clients.Shared.Models;
+using K7.Clients.Shared.Services;
 using K7.Clients.Shared.UI.Components;
 using K7.Clients.Shared.UI.Components.Dialogs;
 using K7.Clients.Shared.UI.Extensions;
@@ -53,8 +54,15 @@ public partial class SelectProfile
     private static IReadOnlyDictionary<string, object>? GetInitialFocusAttributes(bool isTarget) =>
         isTarget ? new Dictionary<string, object> { ["data-initial-focus"] = true } : null;
 
+    protected override void OnParametersSet()
+    {
+        // Just before the first render tree build (init completes synchronously on MAUI).
+        ColdStartTrace.Write("SelectProfile-params-set");
+    }
+
     protected override async Task OnInitializedAsync()
     {
+        ColdStartTrace.Write("SelectProfile-init-start");
         if (DeviceService.GetClientType() == ClientType.Web)
         {
             Navigation.NavigateTo("/");

@@ -20,10 +20,13 @@ public class MainActivity : MauiAppCompatActivity
 
     protected override void OnCreate(Bundle? savedInstanceState)
     {
+        MauiStartupTrace.Mark("MainActivity.OnCreate-start");
         // Ignore restored view state. After TV/process death MAUI Blazor paints the
         // last page (often select-profile) with a dead JS circuit: remote and taps
         // do nothing until a force-stop. A clean start matches Restart().
+        MauiStartupTrace.Mark("base.OnCreate-start");
         base.OnCreate(null);
+        MauiStartupTrace.Mark("base.OnCreate-end");
 
         // Logo overlay ASAP - before permission prompts / window chrome - so cold
         // start is not a long blank brand color.

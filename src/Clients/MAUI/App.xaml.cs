@@ -42,6 +42,7 @@ public partial class App : Application
     protected override Window CreateWindow(IActivationState? activationState)
     {
         Debug.WriteLine("K7 MAUI - App.CreateWindow - start");
+        MauiStartupTrace.Mark("CreateWindow-start");
 
         K7.Clients.Shared.Services.AppReadySignal.Reset();
         MauiStartupVisual.Reset();
@@ -61,6 +62,7 @@ public partial class App : Application
         var window = new Window(placeholder) { Title = "K7" };
         AndroidStartupLottieOverlay.ReadyToBuildStartPage += () => AssignStartPage(window);
         Dispatcher.DispatchDelayed(TimeSpan.FromSeconds(6), () => AssignStartPage(window));
+        MauiStartupTrace.Mark("CreateWindow-end");
         Debug.WriteLine("K7 MAUI - App.CreateWindow - placeholder returned");
         return window;
 #else
@@ -77,6 +79,7 @@ public partial class App : Application
 
         page.Loaded += OnStartPageLoaded;
         var window = new Window(page) { Title = "K7" };
+        MauiStartupTrace.Mark("CreateWindow-end");
         Debug.WriteLine("K7 MAUI - App.CreateWindow - start page returned");
         return window;
 #endif
@@ -91,6 +94,7 @@ public partial class App : Application
             return;
 
         _startPageAssigned = true;
+        MauiStartupTrace.Mark("AssignStartPage-begin");
         ContentPage page;
         try
         {
@@ -113,6 +117,7 @@ public partial class App : Application
         if (sender is Page page)
             page.Loaded -= OnStartPageLoaded;
 
+        MauiStartupTrace.Mark("StartPage-Loaded");
         MauiStartupVisual.NotifyFirstFrame();
         if (sender is not BlazorPage)
         {

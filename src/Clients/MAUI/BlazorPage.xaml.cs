@@ -89,7 +89,9 @@ public partial class BlazorPage : ContentPage
         _audioPlayerService = audioPlayerService;
         _backButtonService = backButtonService;
         _k7ServerService = k7ServerService;
+        MauiStartupTrace.Mark("InitializeComponent-start");
         InitializeComponent();
+        MauiStartupTrace.Mark("InitializeComponent-end");
         var startPath = ResolveStartPath();
         blazorWebView.StartPath = startPath;
 #if WINDOWS
@@ -163,6 +165,7 @@ public partial class BlazorPage : ContentPage
         Loaded -= OnBlazorPageLoaded;
         InitializeNativeVideoOverlay();
         TrySubscribeAccessTokenChanged();
+        MauiStartupTrace.Mark("BlazorPage-Loaded-subscribed");
     }
 
     /// <summary>

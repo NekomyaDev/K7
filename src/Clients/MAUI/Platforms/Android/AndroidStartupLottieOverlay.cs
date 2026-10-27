@@ -43,6 +43,7 @@ internal static class AndroidStartupLottieOverlay
         if (_root is not null || activity.Window?.DecorView is not ViewGroup decor)
             return;
 
+        global::K7.Clients.MAUI.MauiStartupTrace.Mark("SplashOverlay-Show-start");
         _readySignaled = false;
         _logoHidden = false;
         _root = new FrameLayout(activity);
@@ -60,6 +61,7 @@ internal static class AndroidStartupLottieOverlay
             _logo.SetScaleType(ImageView.ScaleType.FitCenter);
             _logo.Elevation = 0f;
             _root.AddView(_logo, CenteredLogoParams(activity));
+            global::K7.Clients.MAUI.MauiStartupTrace.Mark("SplashOverlay-LogoShown");
         }
 
         _lottieView = new ImageView(activity);
@@ -100,6 +102,7 @@ internal static class AndroidStartupLottieOverlay
         if (_root is null)
             return;
 
+        global::K7.Clients.MAUI.MauiStartupTrace.Mark("splash-dismiss");
         if (_driver is not null)
             _driver.FirstOpaqueFrame -= OnFirstOpaqueFrame;
 

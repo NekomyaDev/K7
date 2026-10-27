@@ -9,10 +9,16 @@ public partial class EmptyLayout
 {
     [Inject] private IJSRuntime JS { get; set; } = default!;
 
+    protected override void OnInitialized()
+    {
+        ColdStartTrace.Write("EmptyLayout-init");
+    }
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
         {
+            ColdStartTrace.Write("EmptyLayout-firstRender");
             AppReadySignal.Signal();
             PlaybackAssetLoader.Prefetch(JS);
             try
