@@ -163,7 +163,7 @@ public class IdentityRedirectUriTests
     }
 
     [Test]
-    public void WantsBrowserLanding_ShouldAcceptDisplayPageOrWindowsUserAgent()
+    public void WantsBrowserLanding_ShouldAcceptDisplayPageOrDesktopAndMobileUserAgents()
     {
         var display = new DefaultHttpContext();
         display.Request.QueryString = new QueryString("?display=page");
@@ -175,6 +175,14 @@ public class IdentityRedirectUriTests
 
         var android = new DefaultHttpContext();
         android.Request.Headers.UserAgent = "Mozilla/5.0 (Linux; Android 14) Chrome/120.0.0.0";
-        IdentityRedirectUri.WantsBrowserLanding(android.Request).Should().BeFalse();
+        IdentityRedirectUri.WantsBrowserLanding(android.Request).Should().BeTrue();
+
+        var iphone = new DefaultHttpContext();
+        iphone.Request.Headers.UserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15";
+        IdentityRedirectUri.WantsBrowserLanding(iphone.Request).Should().BeTrue();
+
+        var linuxDesktop = new DefaultHttpContext();
+        linuxDesktop.Request.Headers.UserAgent = "Mozilla/5.0 (X11; Linux x86_64) Firefox/120.0";
+        IdentityRedirectUri.WantsBrowserLanding(linuxDesktop.Request).Should().BeFalse();
     }
 }

@@ -76,7 +76,7 @@ Typical sequence for a healthy native login:
 
 1. `GET /connect/authorize` -> `location welcome` or `sign-in` (cookie missing)
 2. `POST /sign-in` -> `returnUrl local-authorize` and `location local-authorize`
-3. `GET /connect/authorize` -> `location loopback` (`locationHost localhost:port`), `custom-scheme` (`k7://callback/login` on Android/iOS), or `auth-complete` (Windows system browser)
+3. `GET /connect/authorize` -> `location loopback` (`locationHost localhost:port`), `auth-complete` (Windows / Android / iOS after native login), or `custom-scheme` only on older builds
 4. `POST /connect/token` -> 200, `grant authorization_code`, `client k7-native`
 5. `GET /auth/complete` -> 200 (Windows and older loopback clients). The page says the tab can be closed and opens `k7://callback/login`
 6. Client breadcrumbs: `login-start` -> `challenge-ready` -> `loopback` -> `authenticate-ready` -> `persist-ok` -> `login-complete`
@@ -153,6 +153,7 @@ Browser and Windows app work. Android Custom Tabs fail. Deleting the device or r
 - Empty antiforgery **400** on auth POSTs is converted to a GET reload (`AuthFormBadRequestRecovery`)
 - Antiforgery + Identity / 2FA cookies use `SameSite=Lax` so Custom Tabs keep them across authorize to sign-in
 - Auth SSR pages omit `blazor.web.js` (plain HTML forms only)
+- After MFA, authorize should land on `/auth/complete` then open `k7://` (not stay on the web home). Look for `location auth-complete` in Auth logs
 - Confirm Android app Base URL is the same `https://` host as the working browser login
 - Confirm reverse proxy sends `X-Forwarded-Proto: https` when `Security__ForceHttps=true`
 - Auth logs include `antiforgery ok|invalid` and `https True|False` on the failing POST

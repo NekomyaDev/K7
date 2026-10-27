@@ -125,9 +125,10 @@ internal static class IdentityRedirectUri
     }
 
     /// <summary>
-    /// System-browser native login (Windows) needs an HTTP page after authorize.
-    /// A raw 302 to <c>k7://</c> leaves the tab on /sign-in. Mobile in-app browsers
-    /// must keep the custom-scheme Location so they can finish the session.
+    /// Native login needs an HTTP landing after authorize. A raw 302 to <c>k7://</c>
+    /// is often ignored by system browsers and by Android Custom Tabs after a long
+    /// local MFA form flow (tab stays open, app never gets the code). <c>/auth/complete</c>
+    /// opens <c>k7://</c> via Refresh, iframe, and an explicit link.
     /// </summary>
     internal static bool WantsBrowserLanding(HttpRequest request)
     {
@@ -135,7 +136,10 @@ internal static class IdentityRedirectUri
             return true;
 
         var userAgent = request.Headers.UserAgent.ToString();
-        return userAgent.Contains("Windows", StringComparison.OrdinalIgnoreCase);
+        return userAgent.Contains("Windows", StringComparison.OrdinalIgnoreCase)
+            || userAgent.Contains("Android", StringComparison.OrdinalIgnoreCase)
+            || userAgent.Contains("iPhone", StringComparison.OrdinalIgnoreCase)
+            || userAgent.Contains("iPad", StringComparison.OrdinalIgnoreCase);
     }
 
     internal static string? RewriteNativeCallbackToLanding(string? location)

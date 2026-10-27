@@ -3,9 +3,9 @@ using K7.Server.Web.Components.Account;
 namespace K7.Server.Web.Middleware;
 
 /// <summary>
-/// After a Windows system-browser authorize, replace Location k7://... with
-/// /auth/complete so the tab shows the same close message as TV device login.
-/// The complete page then opens k7:// so the running app still receives the code.
+/// After native authorize (Windows / Android / iOS), replace Location k7://... with
+/// /auth/complete so the tab shows the close message and opens k7:// (Refresh,
+/// iframe, link). Raw custom-scheme 302s are unreliable after local MFA in Custom Tabs.
 /// </summary>
 public sealed class NativeAuthorizationLandingMiddleware(RequestDelegate next)
 {
