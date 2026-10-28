@@ -4,6 +4,7 @@ using K7.Clients.MAUI.Services;
 using K7.Clients.Shared.Interfaces;
 using K7.Clients.Shared.Services;
 using K7.Shared.Interfaces;
+using Microsoft.Extensions.DependencyInjection;
 #if ANDROID
 using K7.Clients.MAUI.Platforms.Android;
 #endif
@@ -18,26 +19,30 @@ namespace K7.Clients.MAUI;
 
 public partial class App : Application
 {
-    private readonly K7ServerManagerService _k7ServerManagerService;
-    private readonly IPlayerService _playerService;
-    private readonly IAudioPlayerService _audioPlayerService;
-    private readonly BackButtonService _backButtonService;
-    private readonly IK7ServerService _k7ServerService;
+    private readonly IServiceProvider _services;
 
-    public App(
-        K7ServerManagerService k7ServerManagerService,
-        IPlayerService playerService,
-        IAudioPlayerService audioPlayerService,
-        BackButtonService backButtonService,
-        IK7ServerService k7ServerService)
+    public App(IServiceProvider services)
     {
-        _k7ServerManagerService = k7ServerManagerService;
-        _playerService = playerService;
-        _audioPlayerService = audioPlayerService;
-        _backButtonService = backButtonService;
-        _k7ServerService = k7ServerService;
+        _services = services;
+        MauiStartupTrace.Mark("App-ctor-start");
         InitializeComponent();
+        MauiStartupTrace.Mark("App-ctor-end");
     }
+
+    private K7ServerManagerService ServerManager =>
+        _services.GetRequiredService<K7ServerManagerService>();
+
+    private IPlayerService PlayerService =>
+        _services.GetRequiredService<IPlayerService>();
+
+    private IAudioPlayerService AudioPlayerService =>
+        _services.GetRequiredService<IAudioPlayerService>();
+
+    private BackButtonService BackButtonService =>
+        _services.GetRequiredService<BackButtonService>();
+
+    private IK7ServerService K7ServerService =>
+        _services.GetRequiredService<IK7ServerService>();
 
     protected override Window CreateWindow(IActivationState? activationState)
     {
@@ -45,10 +50,15 @@ public partial class App : Application
         MauiStartupTrace.Mark("CreateWindow-start");
 
         K7.Clients.Shared.Services.AppReadySignal.Reset();
+        K7.Clients.Shared.Services.FirstPaintSignal.Reset();
         MauiStartupVisual.Reset();
-        PrepareServerConnectionAndRestore();
 #if ANDROID
         _startPageAssigned = false;
+#else
+        // Desktop/iOS: restore before first page. Android defers this until AssignStartPage
+        // so CreateWindow stays cheap and DecorView splash can show (~9s OpenIddict DI
+        // resolve was blocking base.OnCreate / Show on TV).
+        PrepareServerConnectionAndRestore();
 #endif
 
         Dispatcher.DispatchDelayed(TimeSpan.FromSeconds(8), () =>
@@ -61,6 +71,10 @@ public partial class App : Application
         var placeholder = new ContentPage { BackgroundColor = Color.FromArgb("#0d0907") };
         var window = new Window(placeholder) { Title = "K7" };
         AndroidStartupLottieOverlay.ReadyToBuildStartPage += () => AssignStartPage(window);
+        // Show() may have already signaled before CreateWindow subscribed (ordering
+        // varies). Catch up so we do not wait on the 6s failsafe.
+        if (AndroidStartupLottieOverlay.WasReadySignaled)
+            AssignStartPage(window);
         Dispatcher.DispatchDelayed(TimeSpan.FromSeconds(6), () => AssignStartPage(window));
         MauiStartupTrace.Mark("CreateWindow-end");
         Debug.WriteLine("K7 MAUI - App.CreateWindow - placeholder returned");
@@ -95,6 +109,10 @@ public partial class App : Application
 
         _startPageAssigned = true;
         MauiStartupTrace.Mark("AssignStartPage-begin");
+        // Under DecorView splash: first OpenIddict/auth DI resolve is expensive on TV.
+        MauiStartupTrace.Mark("SessionRestore-start");
+        PrepareServerConnectionAndRestore();
+        MauiStartupTrace.Mark("SessionRestore-end");
         ContentPage page;
         try
         {
@@ -108,7 +126,9 @@ public partial class App : Application
 
         page.Loaded += OnStartPageLoaded;
         window.Page = page;
-        AndroidStartupLottieOverlay.ResumeTicker();
+        MauiStartupTrace.Mark("AssignStartPage");
+        // Do not ResumeTicker here: BlazorWebView init pauses Skottie for first paint.
+        // Resuming before WebView ready was fine; Attach/Start after Pause starved TV.
     }
 #endif
 
@@ -155,22 +175,22 @@ public partial class App : Application
 
         if (string.IsNullOrEmpty(k7ServerUrl))
         {
-            return new SetupPage(_k7ServerManagerService, _playerService, _audioPlayerService);
+            return new SetupPage(ServerManager, PlayerService, AudioPlayerService);
         }
 
-        try
-        {
-            _k7ServerManagerService.UpdateBaseAddress(k7ServerUrl);
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"K7 MAUI - UpdateBaseAddress failed: {ex}");
-        }
+        // Do not resolve K7ServerManagerService here - it pulls OpenIddict (~20s on TV).
+        MauiSessionBootstrap.ApplyHttpBaseAddress(_services);
 
         try
         {
             Debug.WriteLine("K7 MAUI - GetStartPage - creating BlazorPage");
-            var page = new BlazorPage(_playerService, _audioPlayerService, _backButtonService, _k7ServerService);
+            MauiStartupTrace.Mark("ResolveStartServices-start");
+            var player = PlayerService;
+            var audio = AudioPlayerService;
+            var back = BackButtonService;
+            var server = K7ServerService;
+            MauiStartupTrace.Mark("ResolveStartServices-end");
+            var page = new BlazorPage(player, audio, back, server);
             Debug.WriteLine("K7 MAUI - GetStartPage - BlazorPage created");
             return page;
         }
@@ -238,6 +258,7 @@ public partial class App : Application
         MainThread.BeginInvokeOnMainThread(() =>
         {
             AppReadySignal.Reset();
+            FirstPaintSignal.Reset();
             MauiStartupVisual.Reset();
 #if ANDROID
             Platform.CurrentActivity?.Recreate();

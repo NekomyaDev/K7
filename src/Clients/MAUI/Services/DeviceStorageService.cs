@@ -11,7 +11,9 @@ public class DeviceStorageService : IDeviceStorageService
         PreferenceKeys.ACCESS_TOKEN.Name,
         PreferenceKeys.REFRESH_TOKEN.Name,
         // Contains per-profile refresh tokens (and PIN hashes) - must not sit in plain Preferences.
-        PreferenceKeys.LOCAL_USERS.Name
+        PreferenceKeys.LOCAL_USERS.Name,
+        // Identity snapshot (id, name, roles) kept with the tokens it belongs to.
+        PreferenceKeys.SESSION_CLAIMS.Name
     ];
 
     public T? Get<T>(PreferenceKey<T> key, T? defaultValue = default)

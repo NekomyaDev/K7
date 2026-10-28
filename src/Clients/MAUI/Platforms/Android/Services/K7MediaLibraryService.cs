@@ -92,6 +92,48 @@ public class K7MediaLibraryService : MediaLibraryService,
     private const int MaxStreamAuthRecoveries = 3;
     private const int ExoErrorCodeIoBadHttpStatus = 2004;
 
+    private static readonly Type[] WarmUpServiceTypes =
+    [
+        typeof(IMediaBrowseService),
+        typeof(IAudioPlayerService),
+        typeof(IPlayerService),
+        typeof(IStreamUriService),
+        typeof(IK7ServerService),
+        typeof(IRatingService),
+        typeof(IUserRatingSync),
+        typeof(IPlaybackJournal),
+        typeof(IConnectivityService),
+        typeof(ILocalUserService),
+        typeof(IStringLocalizer<MediaBrowseService>)
+    ];
+
+    /// <summary>
+    /// Resolves the singletons <see cref="InitializeService"/> needs. MainActivity calls this on
+    /// a worker thread before StartService so OnCreate (main thread) only builds the Media3
+    /// objects. Each resolve is isolated: a constructor that fails here is retried in OnCreate.
+    /// </summary>
+    public static void WarmUpDependencies()
+    {
+        var services = IPlatformApplication.Current?.Services;
+        if (services is null)
+            return;
+
+        MauiStartupTrace.Mark("MediaLibrary-warmup-start");
+        foreach (var type in WarmUpServiceTypes)
+        {
+            try
+            {
+                _ = services.GetService(type);
+            }
+            catch (Exception ex)
+            {
+                Log.Warn(Tag, $"Warm-up of {type.Name} failed: {ex.Message}");
+            }
+        }
+
+        MauiStartupTrace.Mark("MediaLibrary-warmup-end");
+    }
+
     public override void OnCreate()
     {
         MauiStartupTrace.Mark("MediaLibrary-OnCreate-start");
@@ -157,6 +199,8 @@ public class K7MediaLibraryService : MediaLibraryService,
         MauiStartupTrace.Mark("MediaLibrary-services-resolved");
 
         // Service may start from Android Auto before App.CreateWindow applies the URL.
+        // HTTP base address only: OpenIddict registration runs on a worker thread through
+        // PrepareHeadlessSessionAsync (EnsureHeavyWorkAsync), never on this main-thread path.
         EnsureServerBaseAddress();
         SubscribeToAuthEvents(services);
         _headlessReady = PrepareHeadlessSessionAsync();
@@ -1386,6 +1430,7 @@ public class K7MediaLibraryService : MediaLibraryService,
     }
 
     private bool _acceptEncodingConfigured;
+    private volatile string? _cachedAccessToken;
 
     private void EnsureServerBaseAddress()
     {
@@ -1393,8 +1438,9 @@ public class K7MediaLibraryService : MediaLibraryService,
         if (services is null)
             return;
 
-        MauiSessionBootstrap.ApplyServerUrl(services);
-        if (_k7ServerService?.HttpClient.BaseAddress is not null)
+        // Not ApplyServerUrl: resolving K7ServerManagerService / OpenIddict here blocked the
+        // main thread for 24 s on a 32-bit TV box (ANR "executing service").
+        if (MauiSessionBootstrap.ApplyHttpBaseAddress(services) && _k7ServerService?.HttpClient.BaseAddress is not null)
             Log.Info(Tag, $"BaseAddress set to {_k7ServerService.HttpClient.BaseAddress}");
     }
 
@@ -1417,7 +1463,29 @@ public class K7MediaLibraryService : MediaLibraryService,
         _authEvents = null;
     }
 
-    private void OnAccessTokenChanged(object? sender, EventArgs e) => UpdateAuthHeaders();
+    private void OnAccessTokenChanged(object? sender, EventArgs e)
+    {
+        _cachedAccessToken = null;
+        if (!MainThread.IsMainThread)
+        {
+            UpdateAuthHeaders();
+            return;
+        }
+
+        // The re-read is a synchronous SecureStorage round trip (~300 ms on a TV box): never
+        // on the main thread. A refresh raised from the Blazor dispatcher lands here.
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                UpdateAuthHeaders();
+            }
+            catch (Exception ex)
+            {
+                Log.Warn(Tag, $"Auth header refresh failed: {ex.Message}");
+            }
+        });
+    }
 
     private async Task PublishRestoredSessionAsync()
     {
@@ -1483,7 +1551,10 @@ public class K7MediaLibraryService : MediaLibraryService,
 
         try
         {
-            await MauiSessionBootstrap.EnsureReadyAsync(services);
+            // Thread pool: started from OnCreate, the chain (refresh grant, device init, music
+            // session, their HTTP / JSON) otherwise continues on the main-thread context and
+            // JITs there (2.4 s stall on a 32-bit TV box).
+            await Task.Run(() => MauiSessionBootstrap.EnsureReadyAsync(services));
             UpdateAuthHeaders();
         }
         catch (Exception ex)
@@ -1583,10 +1654,19 @@ public class K7MediaLibraryService : MediaLibraryService,
         }
 
         // Read token directly from device storage (DelegatingHandler adds it per-request to HttpClient,
-        // but ExoPlayer's HttpDataSource needs it set explicitly)
-        var services = IPlatformApplication.Current?.Services;
-        var deviceStorage = services?.GetService<IDeviceStorageService>();
-        var token = deviceStorage?.Get(K7.Shared.PreferenceKeys.ACCESS_TOKEN);
+        // but ExoPlayer's HttpDataSource needs it set explicitly). Cached: the read is a synchronous
+        // SecureStorage round trip (hundreds of ms on a TV box) and the launcher's Media3 browse
+        // callbacks reach this on the main thread every couple of seconds. OnAccessTokenChanged
+        // drops the cache.
+        var token = _cachedAccessToken;
+        if (token is null)
+        {
+            var services = IPlatformApplication.Current?.Services;
+            var deviceStorage = services?.GetService<IDeviceStorageService>();
+            token = deviceStorage?.Get(K7.Shared.PreferenceKeys.ACCESS_TOKEN);
+            _cachedAccessToken = token ?? string.Empty;
+            MauiStartupTrace.Mark("MediaLibrary-token-read");
+        }
 
         if (!string.IsNullOrEmpty(token))
         {

@@ -28,9 +28,7 @@ public static class PlaybackAssetLoader
 
     public static void Prefetch(IJSRuntime js)
     {
-        if (!OperatingSystem.IsBrowser() && !OperatingSystem.IsWindows() && !LinuxDesktopPlayback.IsLinuxDesktop)
-            return;
-
+        // MAUI Android/iOS also defer playbackAssets.js until after first paint.
         EnsureAsync(js).FireAndForget();
     }
 }

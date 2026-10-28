@@ -231,6 +231,7 @@ public partial class MainLayout : IDisposable
         if (firstRender)
         {
             ColdStartTrace.Write("MainLayout-firstRender");
+            FirstPaintSignal.Signal();
             AppReadySignal.Signal();
             PlaybackAssetLoader.Prefetch(JS);
             await JS.InvokeVoidAsync("K7.applyTheme", ThemeService.Theme.CssDataAttribute);

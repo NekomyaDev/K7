@@ -14,9 +14,12 @@ namespace K7.Clients.MAUI;
 [IntentFilter([Android.Content.Intent.ActionMain], Categories = [Android.Content.Intent.CategoryLeanbackLauncher])]
 public class MainActivity : MauiAppCompatActivity
 {
+    private const int MediaLibraryIdleDelayMs = 2000;
+    private static readonly TimeSpan MediaLibraryStartFailsafe = TimeSpan.FromSeconds(30);
     private long _selectDownTime;
     private bool _selectLongPressFired;
     private bool _mediaLibraryStarted;
+    private CancellationTokenSource? _mediaLibraryStartCts;
 
     protected override void OnCreate(Bundle? savedInstanceState)
     {
@@ -51,22 +54,53 @@ public class MainActivity : MauiAppCompatActivity
             RequestPermissions([Android.Manifest.Permission.PostNotifications], requestCode: 0);
         }
 
-        // Media3/ExoPlayer init is heavy. Wait until the start page has painted so
-        // we do not freeze the overlay Lottie.
-        MauiStartupVisual.StartPageSet += OnStartPageSet;
+        // Media3/ExoPlayer init and the service's DI graph are heavy. Start the service only
+        // after the first Blazor paint plus an idle delay: at StartPageSet it landed on the
+        // main thread in the middle of first render (24 s stall and an ANR on TV).
+        _mediaLibraryStartCts = new CancellationTokenSource();
+        _ = StartMediaLibraryAfterFirstPaintAsync(_mediaLibraryStartCts.Token);
     }
 
-    private void OnStartPageSet()
+    private async Task StartMediaLibraryAfterFirstPaintAsync(CancellationToken cancellationToken)
     {
-        MauiStartupVisual.StartPageSet -= OnStartPageSet;
-        if (_mediaLibraryStarted || IsFinishing)
-            return;
-
-        _mediaLibraryStarted = true;
-        Window?.DecorView.Post(() =>
+        try
         {
+            using var failsafe = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            failsafe.CancelAfter(MediaLibraryStartFailsafe);
+            try
+            {
+                await K7.Clients.Shared.Services.FirstPaintSignal.WaitAsync(failsafe.Token);
+                await Task.Delay(MediaLibraryIdleDelayMs, failsafe.Token);
+            }
+            catch (System.OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                // No first paint within the failsafe (hung WebView): start anyway so media
+                // controls and Android Auto still get the session.
+                MauiStartupTrace.Mark("MediaLibrary-start-failsafe");
+            }
+
+            if (cancellationToken.IsCancellationRequested)
+                return;
+
+            // Build the service's singleton graph on a worker thread so OnCreate (main thread)
+            // only pays for the Media3 objects, which must be created on the main looper.
+            await Task.Run(() => K7MediaLibraryService.WarmUpDependencies(), cancellationToken);
+
+            if (cancellationToken.IsCancellationRequested || IsFinishing || IsDestroyed || _mediaLibraryStarted)
+                return;
+
+            _mediaLibraryStarted = true;
+            MauiStartupTrace.Mark("MediaLibrary-StartService");
             StartService(new Intent(this, typeof(K7MediaLibraryService)));
-        });
+        }
+        catch (System.OperationCanceledException)
+        {
+            // Activity destroyed before the service start.
+        }
+        catch (Exception ex)
+        {
+            global::Android.Util.Log.Warn("K7-Startup", "MediaLibrary deferred start failed: " + ex);
+        }
     }
 
     public override bool DispatchKeyEvent(KeyEvent? e)
@@ -225,7 +259,8 @@ public class MainActivity : MauiAppCompatActivity
 
     protected override void OnDestroy()
     {
-        MauiStartupVisual.StartPageSet -= OnStartPageSet;
+        _mediaLibraryStartCts?.Cancel();
+        _mediaLibraryStartCts = null;
         AndroidStartupLottieOverlay.Dismiss();
         base.OnDestroy();
     }

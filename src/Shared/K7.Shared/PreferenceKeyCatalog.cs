@@ -14,6 +14,8 @@ public static class PreferenceKeyCatalog
         PreferenceKeys.DEVICE_NAME.Name,
         PreferenceKeys.ACCESS_TOKEN.Name,
         PreferenceKeys.REFRESH_TOKEN.Name,
+        PreferenceKeys.ACCESS_TOKEN_EXPIRES_AT.Name,
+        PreferenceKeys.SESSION_CLAIMS.Name,
         PreferenceKeys.DEVICE_ATTACHED_USER_ID.Name,
         PreferenceKeys.SERVER_INFO.Name,
         PreferenceKeys.LOCAL_USERS.Name,

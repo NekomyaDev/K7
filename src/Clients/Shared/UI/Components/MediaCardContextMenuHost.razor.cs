@@ -61,18 +61,20 @@ public partial class MediaCardContextMenuHost : IDisposable
     public void Dispose()
     {
         ContextMenuService.Changed -= OnServiceChanged;
+        ClearMenuPositionAnchorAsync().FireAndForget();
+    }
+
+    // Awaited inside so a JS failure (script not loaded yet, circuit gone) is observed here
+    // instead of surfacing as TaskScheduler.UnobservedTaskException.
+    private async Task ClearMenuPositionAnchorAsync()
+    {
         try
         {
-            _ = JS.InvokeVoidAsync("K7.clearMenuPositionAnchor");
+            await JS.InvokeVoidAsync("K7.clearMenuPositionAnchor");
         }
-        catch (JSDisconnectedException)
+        catch (Exception ex) when (ex is JSException or InvalidOperationException or JSDisconnectedException)
         {
-        }
-        catch (InvalidOperationException)
-        {
-        }
-        catch (JSException)
-        {
+            // Nothing to clear before navigation.js ran, or the WebView is gone.
         }
     }
 }

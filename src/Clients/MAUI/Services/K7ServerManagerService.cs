@@ -105,6 +105,9 @@ public class K7ServerManagerService : IServerConnectionService
         options.Registrations.RemoveAll(
             r => string.Equals(r.ProviderName, "K7", StringComparison.Ordinal));
 
+        // Rotate the persisted OpenIddict client keys with the server.
+        Authentication.OpenIddictClientKeys.Reset();
+
         ((App)Application.Current!).Restart();
     }
 

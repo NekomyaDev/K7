@@ -19,6 +19,8 @@ public partial class EmptyLayout
         if (firstRender)
         {
             ColdStartTrace.Write("EmptyLayout-firstRender");
+            // Before any await - starts DeferredHeavy without waiting on dismissPreload JS.
+            FirstPaintSignal.Signal();
             AppReadySignal.Signal();
             PlaybackAssetLoader.Prefetch(JS);
             try

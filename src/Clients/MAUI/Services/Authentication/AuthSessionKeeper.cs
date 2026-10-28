@@ -1,4 +1,4 @@
-using System.IdentityModel.Tokens.Jwt;
+using K7.Clients.Shared.Helpers;
 using K7.Clients.Shared.Interfaces;
 using K7.Shared;
 using Microsoft.AspNetCore.Components.Authorization;
@@ -89,19 +89,11 @@ public sealed class AuthSessionKeeper : IDisposable
         if (string.IsNullOrEmpty(accessToken))
             return false;
 
-        try
-        {
-            var handler = new JwtSecurityTokenHandler();
-            if (!handler.CanReadToken(accessToken))
-                return false;
-
-            var jwt = handler.ReadJwtToken(accessToken);
-            return jwt.ValidTo <= DateTime.UtcNow.Add(ProactiveRefreshSkew);
-        }
-        catch
-        {
-            return false;
-        }
+        // Stored expiry first: K7 access tokens are encrypted, so "exp" is unreadable here and
+        // the old JWT-only check saw DateTime.MinValue (a forced refresh on every poll).
+        var expiresAt = StoredSession.ParseExpiry(_deviceStorage.Get(PreferenceKeys.ACCESS_TOKEN_EXPIRES_AT))
+            ?? JwtAccessToken.TryReadExpiry(accessToken);
+        return StoredSession.IsAccessTokenNearExpiry(expiresAt, DateTimeOffset.UtcNow, ProactiveRefreshSkew);
     }
 
     public void Dispose()

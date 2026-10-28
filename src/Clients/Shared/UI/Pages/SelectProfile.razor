@@ -7,7 +7,14 @@
 <PageTitle>@L["PageTitle"]</PageTitle>
 
 <div class="select-profile-page">
-    @if (_loading)
+    @* First paint: shell only so EmptyLayout can AppReady before Carousel/avatars/icons JIT. *@
+    @if (!_paintPicker)
+    {
+        <section class="select-profile-section">
+            <p class="select-profile-prompt">@L["Prompt"]</p>
+        </section>
+    }
+    else if (_loading)
     {
         <div class="d-flex flex-col align-center gap-4">
             <K7Spinner />

@@ -22,6 +22,11 @@ public sealed class StartupTraceJsBridge : Java.Lang.Object
             return;
 
         MauiStartupTrace.Mark("js-" + name);
+
+        // K7.dismissPreload runs from EmptyLayout OnAfterRender: the first Blazor frame is in
+        // the DOM and the in-page preload is fading. Fade the native Lottie overlay with it.
+        if (string.Equals(name, "dismiss-preload", StringComparison.Ordinal))
+            AndroidStartupLottieOverlay.NotifyWebContentPainted();
     }
 }
 #endif

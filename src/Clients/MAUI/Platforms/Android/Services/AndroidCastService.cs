@@ -25,8 +25,17 @@ internal sealed class AndroidCastService : ICastService, IDisposable
     private CastMediaRouterCallback? _routerCallback;
     private readonly List<CastDeviceInfo> _devices = [];
     private bool _isCasting;
+    private bool _castContextInitialized;
 
-    public bool IsAvailable => _castContext is not null;
+    public bool IsAvailable
+    {
+        get
+        {
+            EnsureCastContext();
+            return _castContext is not null;
+        }
+    }
+
     public bool IsCasting => _isCasting;
     public IReadOnlyList<CastDeviceInfo> DiscoveredDevices => _devices;
 
@@ -39,6 +48,16 @@ internal sealed class AndroidCastService : ICastService, IDisposable
     public AndroidCastService(ILogger<AndroidCastService> logger)
     {
         _logger = logger;
+        // Defer CastContext / MediaRouter JNI until first cast use so cold start
+        // does not pay for Google Play Services Cast on every launch.
+    }
+
+    private void EnsureCastContext()
+    {
+        if (_castContextInitialized)
+            return;
+
+        _castContextInitialized = true;
         InitializeCastContext();
     }
 
@@ -74,6 +93,7 @@ internal sealed class AndroidCastService : ICastService, IDisposable
 
     public Task StartDiscoveryAsync()
     {
+        EnsureCastContext();
         if (_mediaRouter is null || _mediaRouteSelector is null) return Task.CompletedTask;
 
         _routerCallback = new CastMediaRouterCallback(this);
@@ -94,6 +114,7 @@ internal sealed class AndroidCastService : ICastService, IDisposable
 
     public async Task CastAsync(CastMediaRequest request)
     {
+        EnsureCastContext();
         var castSession = _sessionManager?.CurrentCastSession;
         if (castSession is null)
         {

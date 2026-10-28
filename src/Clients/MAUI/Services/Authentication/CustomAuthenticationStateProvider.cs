@@ -1,4 +1,3 @@
-using System.IdentityModel.Tokens.Jwt;
 using System.Net.Http.Headers;
 using System.Security.Claims;
 using System.Text.Json;
@@ -10,6 +9,7 @@ using K7.Clients.Shared.Services;
 using K7.Shared;
 using K7.Shared.Interfaces;
 using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using OpenIddict.Client;
 using static OpenIddict.Abstractions.OpenIddictConstants;
@@ -24,7 +24,7 @@ public class CustomAuthenticationStateProvider : AuthenticationStateProvider, IC
 {
     public event EventHandler? AccessTokenChanged;
 
-    private readonly OpenIddictClientService _openIddictClientService;
+    private readonly IServiceProvider _services;
     private readonly IK7ServerService _k7ServerService;
     private readonly IUserAdminService _userAdminService;
     private readonly IDeviceApiService _deviceApiService;
@@ -36,7 +36,8 @@ public class CustomAuthenticationStateProvider : AuthenticationStateProvider, IC
     private readonly ILogger<CustomAuthenticationStateProvider> _logger;
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
     private ClaimsPrincipal _currentUser = new(new ClaimsIdentity());
-    private int _initialized; // 0 = not started, 1 = started
+    private int _provisionalApplied;
+    private int _initialized; // 0 = full restore not started, 1 = started
     private Task? _restoreTask;
     private readonly object _initLock = new();
     private static readonly AsyncLocal<bool> RestoreOnCallStack = new();
@@ -45,6 +46,19 @@ public class CustomAuthenticationStateProvider : AuthenticationStateProvider, IC
     /// OpenIddict rolling-token reuse detection and revokes the whole authorization family.
     /// </summary>
     private string? _lastRedeemedRefreshToken;
+    /// <summary>
+    /// Expiry of the access token in storage, mirrored in memory so the headless restore loop
+    /// does not re-read SecureStorage for every check. Null when unknown or cleared.
+    /// </summary>
+    private DateTimeOffset? _accessTokenExpiresAt;
+    private Task<StoredSessionSnapshot?>? _storedSessionPrefetch;
+
+    /// <summary>
+    /// Lazy: constructing <see cref="OpenIddictClientService"/> on first auth DI resolve
+    /// contended with BlazorWebView boot (~10s on TV). Resolve only for real OIDC work.
+    /// </summary>
+    private OpenIddictClientService OpenIddict =>
+        field ??= _services.GetRequiredService<OpenIddictClientService>();
 
     /// <summary>
     /// True while cold-start restore is running on this async flow. The auth HTTP handler
@@ -54,7 +68,7 @@ public class CustomAuthenticationStateProvider : AuthenticationStateProvider, IC
     internal bool IsSessionRestoreInProgress => RestoreOnCallStack.Value;
 
     public CustomAuthenticationStateProvider(
-        OpenIddictClientService openIddictClientService,
+        IServiceProvider services,
         IK7ServerService k7ServerService,
         IUserAdminService userAdminService,
         IDeviceApiService deviceApiService,
@@ -65,7 +79,7 @@ public class CustomAuthenticationStateProvider : AuthenticationStateProvider, IC
         K7HubClient? hubClient = null,
         ILogger<CustomAuthenticationStateProvider>? logger = null)
     {
-        _openIddictClientService = openIddictClientService;
+        _services = services;
         _k7ServerService = k7ServerService;
         _userAdminService = userAdminService;
         _deviceApiService = deviceApiService;
@@ -77,24 +91,123 @@ public class CustomAuthenticationStateProvider : AuthenticationStateProvider, IC
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<CustomAuthenticationStateProvider>.Instance;
     }
 
-    public override async Task<AuthenticationState> GetAuthenticationStateAsync()
+    public override Task<AuthenticationState> GetAuthenticationStateAsync()
     {
-        if (Volatile.Read(ref _initialized) == 0)
+        // Provisional token only. Do not start OpenIddict DB / refresh here: AuthorizeRouteView
+        // and CascadingAuthenticationState call this during Blazor first paint. Full restore
+        // starts after AppReady (UI) or via EnsureReadyForHeadlessPlaybackAsync (Auto).
+        MauiStartupTrace.Mark("AuthState-first-call");
+        EnsureProvisionalApplied();
+        MauiStartupTrace.Mark("AuthState-first-return");
+        return Task.FromResult(new AuthenticationState(_currentUser));
+    }
+
+    private void EnsureProvisionalApplied()
+    {
+        if (Volatile.Read(ref _provisionalApplied) != 0)
+            return;
+
+        lock (_initLock)
         {
-            lock (_initLock)
-            {
-                if (_initialized == 0)
-                {
-                    _restoreTask = TryRestoreSessionAsync();
-                    Volatile.Write(ref _initialized, 1);
-                }
-            }
+            if (_provisionalApplied != 0)
+                return;
+
+            TryApplyProvisionalAccessToken();
+            Volatile.Write(ref _provisionalApplied, 1);
+        }
+    }
+
+    /// <summary>
+    /// Starts OpenIddict session restore. Call after first paint (UI) or from headless EnsureReady.
+    /// </summary>
+    internal void EnsureRestoreStarted()
+    {
+        EnsureProvisionalApplied();
+
+        if (Volatile.Read(ref _initialized) != 0)
+            return;
+
+        lock (_initLock)
+        {
+            if (_initialized != 0)
+                return;
+
+            OpenIddictDbBootstrap.Start(_services);
+            _restoreTask = TryRestoreSessionAsync();
+            Volatile.Write(ref _initialized, 1);
+        }
+    }
+
+    /// <summary>
+    /// UI-only fast path: sign in from the stored session (access token still valid, claims
+    /// snapshot) so AuthorizeRouteView can leave Authorizing without OpenIddictDbBootstrap or
+    /// the token endpoint. Runs on the Blazor dispatcher during first paint.
+    /// </summary>
+    private void TryApplyProvisionalAccessToken()
+    {
+        if (_k7ServerService.HttpClient.BaseAddress is null)
+            return;
+
+        StoredSessionSnapshot? stored;
+        var prefetch = Interlocked.Exchange(ref _storedSessionPrefetch, null);
+        if (prefetch is not null)
+        {
+            stored = AwaitPrefetchedSession(prefetch);
+        }
+        else
+        {
+            if (!MauiSessionRestore.ShouldRestore(_localUserService, serverConfigured: true))
+                return;
+
+            stored = ReadStoredSession();
         }
 
-        if (_restoreTask is not null)
-            await _restoreTask;
+        MauiStartupTrace.Mark("ProvisionalToken-read");
+        if (stored is null || !TryRestoreFromStoredSession(stored))
+            return;
 
-        return new AuthenticationState(_currentUser);
+        MauiStartupTrace.Mark("ProvisionalToken-applied");
+        NativeAuthTrace.Write("provisional-access-token", "ok");
+    }
+
+    /// <summary>
+    /// Reads the stored session on a worker thread ahead of the first
+    /// <see cref="GetAuthenticationStateAsync"/>: every SecureStorage read is a synchronous
+    /// Keystore round trip (100-300 ms on a TV box) and that first call runs on the main
+    /// thread during Blazor first paint. Call once the server URL is applied.
+    /// </summary>
+    internal void PrefetchStoredSession()
+    {
+        if (Volatile.Read(ref _provisionalApplied) != 0 || _storedSessionPrefetch is not null)
+            return;
+
+        var prefetch = Task.Run<StoredSessionSnapshot?>(() =>
+        {
+            if (_k7ServerService.HttpClient.BaseAddress is null
+                || !MauiSessionRestore.ShouldRestore(_localUserService, serverConfigured: true))
+                return null;
+
+            var stored = ReadStoredSession();
+            MauiStartupTrace.Mark("ProvisionalToken-prefetched");
+            return stored;
+        });
+
+        Interlocked.CompareExchange(ref _storedSessionPrefetch, prefetch, null);
+    }
+
+    private StoredSessionSnapshot? AwaitPrefetchedSession(Task<StoredSessionSnapshot?> prefetch)
+    {
+        try
+        {
+            // Started at CreateWindow, normally long finished; otherwise this costs what the
+            // synchronous read would.
+            return prefetch.GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Stored session prefetch failed");
+            return null;
+        }
     }
 
     /// <summary>
@@ -111,9 +224,12 @@ public class CustomAuthenticationStateProvider : AuthenticationStateProvider, IC
         {
             MauiStartupTrace.MarkRepeat("Headless-attempt");
             AllowRestoreRetryIfNeeded();
-            await GetAuthenticationStateAsync();
+            EnsureRestoreStarted();
+            var restore = _restoreTask;
+            if (restore is not null)
+                await restore.WaitAsync(cancellationToken);
 
-            if (HasUsableOnlineAccessToken())
+            if (ReadyForHeadlessPlayback())
                 return;
 
             var serverConfigured = _k7ServerService.HttpClient.BaseAddress is not null;
@@ -135,16 +251,27 @@ public class CustomAuthenticationStateProvider : AuthenticationStateProvider, IC
                 }
             }
 
-            if (HasUsableOnlineAccessToken())
+            if (ReadyForHeadlessPlayback())
                 return;
 
             await TryRefreshAsync(cancellationToken);
-            if (HasUsableOnlineAccessToken())
+            if (ReadyForHeadlessPlayback())
                 return;
 
             if (attempt < MauiSessionRestore.HeadlessRestoreMaxAttempts - 1)
                 await Task.Delay(MauiSessionRestore.HeadlessRestoreRetryDelay, cancellationToken);
         }
+
+        MauiStartupTrace.MarkRepeat("Headless-auth-exhausted");
+    }
+
+    private bool ReadyForHeadlessPlayback()
+    {
+        if (!HasUsableOnlineAccessToken())
+            return false;
+
+        MauiStartupTrace.MarkRepeat("Headless-auth-usable");
+        return true;
     }
 
     public async Task LoginAsync(CancellationToken cancellationToken = default)
@@ -180,7 +307,7 @@ public class CustomAuthenticationStateProvider : AuthenticationStateProvider, IC
                         Environment.GetEnvironmentVariable(K7.Clients.MAUI.Linux.LinuxAuthRedirect.EnvironmentVariable)))
                     authorizeParameters["display"] = "page";
 #endif
-                var challenge = await _openIddictClientService.ChallengeInteractivelyAsync(new()
+                var challenge = await OpenIddict.ChallengeInteractivelyAsync(new()
                 {
                     CancellationToken = timeout.Token,
                     ProviderName = "K7",
@@ -190,7 +317,7 @@ public class CustomAuthenticationStateProvider : AuthenticationStateProvider, IC
                 NativeAuthTrace.Write("challenge-ready");
                 _logger.LogInformation("Interactive login challenge issued");
 
-                var result = await _openIddictClientService.AuthenticateInteractivelyAsync(new()
+                var result = await OpenIddict.AuthenticateInteractivelyAsync(new()
                 {
                     CancellationToken = timeout.Token,
                     Nonce = challenge.Nonce
@@ -207,7 +334,7 @@ public class CustomAuthenticationStateProvider : AuthenticationStateProvider, IC
 
                 _currentUser = new ClaimsPrincipal(new ClaimsIdentity(result.Principal.Claims, "OpenIddict", Claims.Name, Claims.Role));
 
-                StoreAccessToken(accessToken);
+                StoreAccessToken(accessToken, ResolveInteractiveAccessTokenExpiry(result));
 
                 if (!string.IsNullOrEmpty(result.RefreshToken))
                     PersistRefreshToken(result.RefreshToken);
@@ -223,6 +350,7 @@ public class CustomAuthenticationStateProvider : AuthenticationStateProvider, IC
                 else
                 {
                     NativeAuthTrace.Write("persist-ok");
+                    PersistSessionClaims();
                     await SaveLocalUserFromCurrentUserAsync(timeout.Token).ConfigureAwait(false);
                     await TryAttachCurrentUserToDeviceAsync(timeout.Token).ConfigureAwait(false);
                 }
@@ -283,14 +411,15 @@ public class CustomAuthenticationStateProvider : AuthenticationStateProvider, IC
             if (root.TryGetProperty("access_token", out var tokenProp))
             {
                 var accessToken = tokenProp.GetString()!;
-                StoreAccessToken(accessToken);
+                DateTimeOffset? expiresAt = null;
+                if (root.TryGetProperty("expires_in", out var expiresInProp)
+                    && expiresInProp.ValueKind == JsonValueKind.Number
+                    && expiresInProp.TryGetInt64(out var expiresInSeconds))
+                    expiresAt = DateTimeOffset.UtcNow.AddSeconds(expiresInSeconds);
+                StoreAccessToken(accessToken, expiresAt ?? JwtAccessToken.TryReadExpiry(accessToken));
 
-                var handler = new JwtSecurityTokenHandler();
-                if (handler.CanReadToken(accessToken))
-                {
-                    var jwt = handler.ReadJwtToken(accessToken);
-                    _currentUser = new ClaimsPrincipal(new ClaimsIdentity(jwt.Claims, "OpenIddict", Claims.Name, Claims.Role));
-                }
+                _currentUser = new ClaimsPrincipal(new ClaimsIdentity(JwtAccessToken.ReadClaims(accessToken), "OpenIddict", Claims.Name, Claims.Role));
+                PersistSessionClaims();
             }
         }
         catch
@@ -303,7 +432,7 @@ public class CustomAuthenticationStateProvider : AuthenticationStateProvider, IC
 
     public async Task LoginWithDeviceCodeAsync(Func<DeviceCodeInfo, Task> onDeviceCodeReceived, CancellationToken cancellationToken = default)
     {
-        var challenge = await _openIddictClientService.ChallengeUsingDeviceAsync(new()
+        var challenge = await OpenIddict.ChallengeUsingDeviceAsync(new()
         {
             CancellationToken = cancellationToken,
             ProviderName = "K7"
@@ -315,7 +444,7 @@ public class CustomAuthenticationStateProvider : AuthenticationStateProvider, IC
             challenge.VerificationUriComplete?.ToString() ?? challenge.VerificationUri + "?user_code=" + Uri.EscapeDataString(challenge.UserCode),
             DateTimeOffset.UtcNow.Add(challenge.ExpiresIn)));
 
-        var result = await _openIddictClientService.AuthenticateWithDeviceAsync(new()
+        var result = await OpenIddict.AuthenticateWithDeviceAsync(new()
         {
             CancellationToken = cancellationToken,
             DeviceCode = challenge.DeviceCode,
@@ -326,7 +455,7 @@ public class CustomAuthenticationStateProvider : AuthenticationStateProvider, IC
 
         _currentUser = new ClaimsPrincipal(new ClaimsIdentity(result.Principal.Claims, "OpenIddict", Claims.Name, Claims.Role));
 
-        StoreAccessToken(result.AccessToken);
+        StoreAccessToken(result.AccessToken, result.AccessTokenExpirationDate);
 
         if (!string.IsNullOrEmpty(result.RefreshToken))
             PersistRefreshToken(result.RefreshToken);
@@ -359,6 +488,7 @@ public class CustomAuthenticationStateProvider : AuthenticationStateProvider, IC
             catch { }
         }
 
+        PersistSessionClaims();
         await SaveLocalUserFromCurrentUserAsync(cancellationToken);
         await TryAttachCurrentUserToDeviceAsync(cancellationToken);
 
@@ -415,7 +545,7 @@ public class CustomAuthenticationStateProvider : AuthenticationStateProvider, IC
 
         _currentUser = new ClaimsPrincipal(new ClaimsIdentity(claims, AuthIdentity.OfflineAuthenticationType, Claims.Name, ClaimTypes.Role));
         _k7ServerService.HttpClient.DefaultRequestHeaders.Authorization = null;
-        _deviceStorageService.Remove(PreferenceKeys.ACCESS_TOKEN);
+        RemoveStoredAccessToken();
         NotifyAuthenticationStateChanged(Task.FromResult(new AuthenticationState(_currentUser)));
     }
 
@@ -446,6 +576,8 @@ public class CustomAuthenticationStateProvider : AuthenticationStateProvider, IC
         {
             RestoreOnCallStack.Value = false;
             MauiStartupTrace.MarkRepeat("AuthRestore-end");
+            // Wake CascadingAuthenticationState / AuthorizeRouteView that painted early.
+            NotifyAuthenticationStateChanged(Task.FromResult(new AuthenticationState(_currentUser)));
         }
     }
 
@@ -556,6 +688,9 @@ public class CustomAuthenticationStateProvider : AuthenticationStateProvider, IC
         InvalidGrant
     }
 
+    /// <summary>Access token plus the expiry and claims snapshot persisted with it.</summary>
+    private sealed record StoredSessionSnapshot(string? AccessToken, DateTimeOffset? ExpiresAt, string? ClaimsJson);
+
     private async Task<RefreshOutcome> TryRefreshTokenAsync(
         string refreshToken,
         CancellationToken cancellationToken = default,
@@ -571,14 +706,14 @@ public class CustomAuthenticationStateProvider : AuthenticationStateProvider, IC
                 // Empty RT means the session cannot be renewed (e.g. after InvalidGrant cleared it).
                 // Do not treat as transient: solo restore would otherwise SignInOffline and skip
                 // select-profile / reconnect badge on the next cold start.
-                var accessTokenWhenEmpty = _deviceStorageService.Get(PreferenceKeys.ACCESS_TOKEN);
+                var storedWhenEmpty = ReadStoredSession();
                 var mustHitWhenEmpty = forceRefresh
                     || (!string.IsNullOrEmpty(rejectedAccessToken)
-                        && string.Equals(accessTokenWhenEmpty, rejectedAccessToken, StringComparison.Ordinal));
+                        && string.Equals(storedWhenEmpty.AccessToken, rejectedAccessToken, StringComparison.Ordinal));
 
                 if (!forUserSwitch
                     && !mustHitWhenEmpty
-                    && TryRestoreFromAccessToken(accessTokenWhenEmpty))
+                    && TryRestoreFromStoredSession(storedWhenEmpty))
                     return RefreshOutcome.Success;
 
                 return RefreshOutcome.InvalidGrant;
@@ -595,13 +730,14 @@ public class CustomAuthenticationStateProvider : AuthenticationStateProvider, IC
             // Reuse a still-valid access token unless the caller just got a 401 for that exact token,
             // or proactive rotation was requested (native ExoPlayer keeps a baked Bearer).
             // Never reuse on user switch - SwitchToUserAsync clears the prior session first.
+            // Validity comes from the stored expiry: the token itself is an opaque JWE.
             var mustHitTokenEndpoint = forceRefresh
                 || (!string.IsNullOrEmpty(rejectedAccessToken)
                     && string.Equals(accessToken, rejectedAccessToken, StringComparison.Ordinal));
 
             if (!forUserSwitch
                 && !mustHitTokenEndpoint
-                && TryRestoreFromAccessToken(accessToken))
+                && TryRestoreFromStoredSession(ReadStoredSession(accessToken)))
                 return RefreshOutcome.Success;
 
             // Another waiter may already have redeemed this RT while we queued on the lock.
@@ -615,7 +751,7 @@ public class CustomAuthenticationStateProvider : AuthenticationStateProvider, IC
                 {
                     refreshToken = rotated;
                 }
-                else if (!mustHitTokenEndpoint && TryRestoreFromAccessToken(accessToken))
+                else if (!mustHitTokenEndpoint && TryRestoreFromStoredSession(ReadStoredSession(accessToken)))
                 {
                     return RefreshOutcome.Success;
                 }
@@ -631,18 +767,24 @@ public class CustomAuthenticationStateProvider : AuthenticationStateProvider, IC
                 cts.CancelAfter(TimeSpan.FromSeconds(15));
 
                 var redeemingRefreshToken = refreshToken;
-                var result = await _openIddictClientService.AuthenticateWithRefreshTokenAsync(new()
+                MauiStartupTrace.MarkRepeat("AuthRefresh-token-endpoint-start");
+                // Thread pool: the first OpenIddict pipeline run JITs ~1400 methods and the
+                // continuations would otherwise land on the caller's context (Blazor dispatcher
+                // on the main thread for the solo auto-login), stalling first paint ~2 s on TV.
+                // AsTask: the OpenIddict call returns a ValueTask, which Task.Run does not unwrap.
+                var result = await Task.Run(() => OpenIddict.AuthenticateWithRefreshTokenAsync(new()
                 {
                     CancellationToken = cts.Token,
                     RefreshToken = redeemingRefreshToken,
                     ProviderName = "K7"
-                });
+                }).AsTask(), cts.Token);
+                MauiStartupTrace.MarkRepeat("AuthRefresh-token-endpoint-end");
 
                 _lastRedeemedRefreshToken = redeemingRefreshToken;
 
                 _currentUser = new ClaimsPrincipal(new ClaimsIdentity(result.Principal.Claims, "OpenIddict", Claims.Name, Claims.Role));
 
-                StoreAccessToken(result.AccessToken);
+                StoreAccessToken(result.AccessToken, result.AccessTokenExpirationDate);
 
                 if (!string.IsNullOrEmpty(result.RefreshToken))
                     PersistRefreshToken(result.RefreshToken);
@@ -668,6 +810,7 @@ public class CustomAuthenticationStateProvider : AuthenticationStateProvider, IC
                     catch { }
                 }
 
+                PersistSessionClaims();
                 return RefreshOutcome.Success;
             }
             catch (HttpRequestException)
@@ -889,71 +1032,151 @@ public class CustomAuthenticationStateProvider : AuthenticationStateProvider, IC
             _localUserService.UpdateRefreshToken(identityUserId, refreshToken);
     }
 
-    private static string? TryReadSubject(string? accessToken)
+    private string? TryReadSubject(string? accessToken)
     {
         if (string.IsNullOrEmpty(accessToken))
             return null;
 
-        var handler = new JwtSecurityTokenHandler();
-        if (!handler.CanReadToken(accessToken))
-            return null;
+        // Encrypted token: fall back to the claims snapshot stored with it.
+        var claims = JwtAccessToken.ReadClaims(accessToken);
+        if (claims.Count == 0)
+            claims = StoredSession.DeserializeClaims(_deviceStorageService.Get(PreferenceKeys.SESSION_CLAIMS));
 
-        var jwt = handler.ReadJwtToken(accessToken);
-        return jwt.Subject
-               ?? jwt.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value;
+        return claims.FirstOrDefault(c => c.Type == Claims.Subject)?.Value
+               ?? claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value;
     }
 
-    private static bool IsAccessTokenValid(string? accessToken)
+    private StoredSessionSnapshot ReadStoredSession() =>
+        ReadStoredSession(_deviceStorageService.Get(PreferenceKeys.ACCESS_TOKEN));
+
+    private StoredSessionSnapshot ReadStoredSession(string? accessToken)
     {
         if (string.IsNullOrEmpty(accessToken))
-            return false;
+            return new StoredSessionSnapshot(null, null, null);
 
-        var handler = new JwtSecurityTokenHandler();
-        if (!handler.CanReadToken(accessToken))
-            return false;
-
-        var jwt = handler.ReadJwtToken(accessToken);
-        return jwt.ValidTo > DateTime.UtcNow.AddMinutes(1);
+        return new StoredSessionSnapshot(
+            accessToken,
+            StoredSession.ParseExpiry(_deviceStorageService.Get(PreferenceKeys.ACCESS_TOKEN_EXPIRES_AT)),
+            _deviceStorageService.Get(PreferenceKeys.SESSION_CLAIMS));
     }
 
-    private bool TryRestoreFromAccessToken(string? accessToken)
+    /// <summary>
+    /// Signs in from storage without the token endpoint: the stored access token is still
+    /// valid (expiry taken from the token response - the JWE itself is opaque) and the claims
+    /// snapshot carries a user id. Applies the Bearer without rewriting storage.
+    /// </summary>
+    private bool TryRestoreFromStoredSession(StoredSessionSnapshot stored)
     {
-        if (!IsAccessTokenValid(accessToken))
+        if (string.IsNullOrEmpty(stored.AccessToken))
             return false;
 
-        var handler = new JwtSecurityTokenHandler();
-        var jwt = handler.ReadJwtToken(accessToken!);
-        _currentUser = new ClaimsPrincipal(new ClaimsIdentity(jwt.Claims, "OpenIddict", Claims.Name, Claims.Role));
-        StoreAccessToken(accessToken);
+        var expiresAt = ResolveAccessTokenExpiry(stored.AccessToken, stored.ExpiresAt);
+        if (!StoredSession.IsAccessTokenUsable(expiresAt, DateTimeOffset.UtcNow))
+            return false;
+
+        var claims = JwtAccessToken.ReadClaims(stored.AccessToken);
+        if (claims.Count == 0)
+            claims = StoredSession.DeserializeClaims(stored.ClaimsJson);
+
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, "OpenIddict", Claims.Name, Claims.Role));
+        if (AuthIdentity.GetUserId(principal) is null)
+            return false;
+
+        _currentUser = principal;
+        _accessTokenExpiresAt = expiresAt;
+        ApplyAccessToken(stored.AccessToken);
+        MauiStartupTrace.MarkRepeat("AuthSession-restored-from-storage");
         return true;
+    }
+
+    private static DateTimeOffset? ResolveAccessTokenExpiry(string? accessToken, DateTimeOffset? storedExpiry) =>
+        storedExpiry ?? JwtAccessToken.TryReadExpiry(accessToken);
+
+    private bool IsStoredAccessTokenUsable()
+    {
+        var accessToken = _deviceStorageService.Get(PreferenceKeys.ACCESS_TOKEN);
+        if (string.IsNullOrEmpty(accessToken))
+            return false;
+
+        var expiresAt = _accessTokenExpiresAt ?? ResolveAccessTokenExpiry(
+            accessToken,
+            StoredSession.ParseExpiry(_deviceStorageService.Get(PreferenceKeys.ACCESS_TOKEN_EXPIRES_AT)));
+        return StoredSession.IsAccessTokenUsable(expiresAt, DateTimeOffset.UtcNow);
     }
 
     private void ClearStoredTokens()
     {
-        _deviceStorageService.Remove(PreferenceKeys.ACCESS_TOKEN);
+        RemoveStoredAccessToken();
         _deviceStorageService.Remove(PreferenceKeys.REFRESH_TOKEN);
+    }
+
+    private void RemoveStoredAccessToken()
+    {
+        _accessTokenExpiresAt = null;
+        _deviceStorageService.Remove(PreferenceKeys.ACCESS_TOKEN);
+        _deviceStorageService.Remove(PreferenceKeys.ACCESS_TOKEN_EXPIRES_AT);
+        _deviceStorageService.Remove(PreferenceKeys.SESSION_CLAIMS);
     }
 
     private static string? ResolveInteractiveAccessToken(OpenIddictClientModels.InteractiveAuthenticationResult result) =>
         result.BackchannelAccessToken ?? result.FrontchannelAccessToken;
 
-    private void StoreAccessToken(string? accessToken)
+    private static DateTimeOffset? ResolveInteractiveAccessTokenExpiry(OpenIddictClientModels.InteractiveAuthenticationResult result) =>
+        result.BackchannelAccessToken is not null
+            ? result.BackchannelAccessTokenExpirationDate
+            : result.FrontchannelAccessTokenExpirationDate;
+
+    /// <summary>
+    /// Persists the token with its expiry from the token response. K7 access tokens are
+    /// encrypted, so this stored date is the only way to know when the token stops working.
+    /// </summary>
+    private void StoreAccessToken(string? accessToken, DateTimeOffset? expiresAt)
     {
         if (string.IsNullOrEmpty(accessToken))
             return;
 
         var previous = _deviceStorageService.Get(PreferenceKeys.ACCESS_TOKEN);
 
+        ApplyAccessToken(accessToken);
+        _deviceStorageService.Set(PreferenceKeys.ACCESS_TOKEN, accessToken);
+        PersistAccessTokenExpiry(expiresAt);
+
+        if (!string.Equals(previous, accessToken, StringComparison.Ordinal))
+        {
+            MauiStartupTrace.MarkRepeat("AccessToken-changed");
+            AccessTokenChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    private void ApplyAccessToken(string accessToken)
+    {
         _k7ServerService.HttpClient.DefaultRequestHeaders.Authorization =
             new AuthenticationHeaderValue("Bearer", accessToken);
-        _deviceStorageService.Set(PreferenceKeys.ACCESS_TOKEN, accessToken);
         _hubClient?.UpdateAccessToken(accessToken);
 #if WINDOWS
         WindowsStreamAuthContext.UpdateFrom(_k7ServerService);
 #endif
+    }
 
-        if (!string.Equals(previous, accessToken, StringComparison.Ordinal))
-            AccessTokenChanged?.Invoke(this, EventArgs.Empty);
+    private void PersistAccessTokenExpiry(DateTimeOffset? expiresAt)
+    {
+        _accessTokenExpiresAt = expiresAt;
+        if (expiresAt is { } value)
+            _deviceStorageService.Set(PreferenceKeys.ACCESS_TOKEN_EXPIRES_AT, StoredSession.FormatExpiry(value));
+        else
+            _deviceStorageService.Remove(PreferenceKeys.ACCESS_TOKEN_EXPIRES_AT);
+    }
+
+    /// <summary>
+    /// Snapshot of the signed-in principal (id, name, roles) for the storage restore path.
+    /// Removed with the access token.
+    /// </summary>
+    private void PersistSessionClaims()
+    {
+        if (!AuthIdentity.IsOnlineAuthenticated(_currentUser))
+            return;
+
+        _deviceStorageService.Set(PreferenceKeys.SESSION_CLAIMS, StoredSession.SerializeClaims(_currentUser.Claims));
     }
 
     private bool HasPersistedSessionTokens()
@@ -965,8 +1188,7 @@ public class CustomAuthenticationStateProvider : AuthenticationStateProvider, IC
     }
 
     private bool HasUsableOnlineAccessToken() =>
-        AuthIdentity.IsOnlineAuthenticated(_currentUser)
-        && IsAccessTokenValid(_deviceStorageService.Get(PreferenceKeys.ACCESS_TOKEN));
+        AuthIdentity.IsOnlineAuthenticated(_currentUser) && IsStoredAccessTokenUsable();
 
     private void AllowRestoreRetryIfNeeded()
     {

@@ -1,3 +1,4 @@
+using K7.Clients.Shared.Helpers;
 using K7.Clients.Shared.UI.Helpers;
 using Microsoft.AspNetCore.Components;
 using Microsoft.JSInterop;
@@ -83,23 +84,26 @@ public partial class Carousel : IAsyncDisposable
         _lastItemCount = ItemCount;
     }
 
-    protected override async Task OnAfterRenderAsync(bool firstRender)
+    protected override Task OnAfterRenderAsync(bool firstRender)
     {
         if (_disposed)
-            return;
+            return Task.CompletedTask;
 
         if (firstRender)
         {
             _lastContentKey = ContentKey;
-            await EnsureInitializedAsync();
-            return;
+            // Do not await: EmptyLayout AppReadySignal runs after child OnAfterRenderAsync.
+            // Awaiting import(carousel.js)+Embla blocked first paint ~20s on Android TV.
+            EnsureInitializedAsync().FireAndForget();
+            return Task.CompletedTask;
         }
 
         if (ContentKey == _lastContentKey)
-            return;
+            return Task.CompletedTask;
 
         _lastContentKey = ContentKey;
-        await NotifyItemsChangedAsync();
+        NotifyItemsChangedAsync().FireAndForget();
+        return Task.CompletedTask;
     }
 
     public async Task EnsureInitializedAsync()

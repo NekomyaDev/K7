@@ -43,6 +43,14 @@ public static partial class MauiProgram
     {
         MauiStartupTrace.Mark("CreateMauiApp-start");
         ColdStartTrace.Mark = MauiStartupTrace.Mark;
+        // AppReady may fire at SelectProfile OnInitialized (before first paint). Do not start
+        // OpenIddict there - it starved EmptyLayout ~13s on TV. Heavy work waits FirstPaint.
+        AppReadySignal.OnSignaled = static () => MauiStartupTrace.Mark("AppReadySignal");
+        FirstPaintSignal.OnSignaled = static () =>
+        {
+            MauiStartupTrace.Mark("FirstPaintSignal");
+            MauiSessionBootstrap.ScheduleHeavyWorkAfterFirstPaint();
+        };
 #if LINUX
         // Static Essentials (Preferences, FileSystem, DeviceInfo) must work before DI exists.
         LinuxEssentialsDefaults.ApplyEarly();
@@ -345,25 +353,8 @@ public static partial class MauiProgram
 #endif
         System.Diagnostics.Debug.WriteLine("K7 MAUI - builder.Build() completed");
 
-        var offlineDbFactory = app.Services.GetRequiredService<IDbContextFactory<OfflineMediaDbContext>>();
-        OfflineDbBootstrap.Start(offlineDbFactory);
-        OpenIddictDbBootstrap.Start(app.Services);
-
-        // Event subscriptions only - do not block first frame on these graphs.
-        _ = Task.Run(() =>
-        {
-            try
-            {
-                app.Services.GetRequiredService<AudioPlaybackProgressTracker>();
-                app.Services.GetRequiredService<RemotePlaybackHandler>();
-                app.Services.GetRequiredService<MusicSessionPersistenceService>();
-                app.Services.GetRequiredService<IPlaybackSyncService>();
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine("K7 MAUI - playback handler init failed: " + ex);
-            }
-        });
+        // OfflineDb / OpenIddict EnsureCreated + playback warmups: ScheduleHeavyWorkAfterFirstPaint
+        // (AppReady) or MauiSessionBootstrap.EnsureReadyAsync (Android Auto headless).
 
         System.Diagnostics.Debug.WriteLine("K7 MAUI - CreateMauiApp returning");
         MauiStartupTrace.Mark("CreateMauiApp-end");
@@ -408,8 +399,9 @@ public static partial class MauiProgram
                        .AllowRefreshTokenFlow();
 
 #if ANDROID || IOS
-                options.AddEphemeralEncryptionKey()
-                       .AddEphemeralSigningKey();
+                // Persisted symmetric keys: no RSA generation on the cold-start path, and the
+                // state token of a browser login survives a process kill before the callback.
+                OpenIddictClientKeys.Register(options);
 #else
                 // Development certificates live in the CurrentUser X.509 store and often
                 // break after wiping LocalState. Prefer ephemeral keys on desktop too.

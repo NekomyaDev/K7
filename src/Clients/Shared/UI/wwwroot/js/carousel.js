@@ -44,8 +44,14 @@ function reportVisibleSlides(rootElement, embla, dotNetRef) {
     invokeDotNet(dotNetRef, 'OnVisibleSlides', first, last);
 }
 
-export function init(rootElement, dotNetRef) {
+export async function init(rootElement, dotNetRef) {
     if (!rootElement || rootElement.__embla) return;
+
+    if (globalThis.K7 && typeof K7.ensureEmbla === 'function')
+        await K7.ensureEmbla();
+
+    if (typeof globalThis.EmblaCarousel !== 'function')
+        return;
 
     var viewportNode = rootElement.querySelector('[data-carousel-viewport]');
     if (!viewportNode) return;

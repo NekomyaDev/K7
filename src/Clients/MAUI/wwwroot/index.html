@@ -108,13 +108,110 @@
         })();
     </script>
     <script src="_content/K7.Clients.Shared.UI/js/lottie-interop.js"></script>
-    <script src="_content/K7.Clients.Shared.UI/dist/embla-carousel/embla-carousel.umd.js"></script>
-    <script src="_content/K7.Clients.Shared.UI/lib/js-spatial-navigation/spatial_navigation.js"></script>
-    <script src="_content/K7.Clients.Shared.UI/js/navigation.js"></script>
-    <script src="_content/K7.Clients.Shared.UI/dist/qrcodejs/qrcode.min.js"></script>
-    <script src="_content/K7.Clients.Shared.UI/js/qrcode.js"></script>
-    <script src="_content/K7.Clients.Shared.UI/js/playbackAssets.js"></script>
-    <script src="js/windowsStreamFetch.js"></script>
+    <!-- navigation.js (shell JS API + spatial nav) loads before Blazor starts on every device.
+         Only Embla / QR / playback assets are deferred. -->
+    <script>
+        (function () {
+            var ui = '_content/K7.Clients.Shared.UI/';
+
+            function loadScript(src) {
+                return new Promise(function (resolve, reject) {
+                    if (document.querySelector('script[src="' + src + '"]')) {
+                        resolve();
+                        return;
+                    }
+                    var script = document.createElement('script');
+                    script.src = src;
+                    script.async = false;
+                    script.onload = function () { resolve(); };
+                    script.onerror = function () { reject(new Error('Failed to load ' + src)); };
+                    document.head.appendChild(script);
+                });
+            }
+
+            window.K7 = window.K7 || {};
+
+            // Stub until playbackAssets.js loads - players call ensurePlaybackAssets.
+            K7.ensurePlaybackAssets = function () {
+                if (K7._playbackAssetsBootstrap)
+                    return K7._playbackAssetsBootstrap;
+                K7._playbackAssetsBootstrap = loadScript(ui + 'js/playbackAssets.js')
+                    .then(function () {
+                        // Real implementation replaced this stub.
+                        return K7.ensurePlaybackAssets();
+                    });
+                return K7._playbackAssetsBootstrap;
+            };
+
+            K7.ensureEmbla = function () {
+                if (window.EmblaCarousel)
+                    return Promise.resolve();
+                if (K7._emblaPromise)
+                    return K7._emblaPromise;
+                K7._emblaPromise = loadScript(ui + 'dist/embla-carousel/embla-carousel.umd.js');
+                return K7._emblaPromise;
+            };
+
+            K7.ensureQrCode = function () {
+                if (typeof QRCode === 'function' && window.k7QrCode && !window.k7QrCode.__stub)
+                    return Promise.resolve();
+                if (K7._qrPromise)
+                    return K7._qrPromise;
+                K7._qrPromise = loadScript(ui + 'dist/qrcodejs/qrcode.min.js')
+                    .then(function () { return loadScript(ui + 'js/qrcode.js'); });
+                return K7._qrPromise;
+            };
+
+            // Available before deferred qrcode.js so Blazor InvokeVoidAsync does not throw.
+            window.k7QrCode = {
+                __stub: true,
+                generate: function (elementId, text, size) {
+                    return K7.ensureQrCode().then(function () {
+                        if (window.k7QrCode && !window.k7QrCode.__stub)
+                            return window.k7QrCode.generate(elementId, text, size);
+                    });
+                }
+            };
+
+            // navigation.js carries the shell API (menu anchors, music flush hook, mobile locks)
+            // and MainLayout's first render calls into it. Phones used to defer it, and the
+            // solo auto-login now reaches home before a deferred load finishes
+            // ("K7.clearMenuPositionAnchor is not a function").
+            var critical = [
+                loadScript(ui + 'lib/js-spatial-navigation/spatial_navigation.js'),
+                loadScript(ui + 'js/navigation.js')
+            ];
+
+            // After first paint signal (or short failsafe), load non-critical libs.
+            function loadDeferred() {
+                k7StartupMark('deferred-scripts-start');
+                return Promise.resolve()
+                    .then(function () { return K7.ensureEmbla(); })
+                    .then(function () { return K7.ensureQrCode(); })
+                    .then(function () { return loadScript(ui + 'js/playbackAssets.js'); })
+                    .then(function () { return loadScript('js/windowsStreamFetch.js'); })
+                    .then(function () { k7StartupMark('deferred-scripts-end'); })
+                    .catch(function (err) {
+                        console.warn('K7 deferred startup scripts', err);
+                    });
+            }
+
+            window.__K7_loadDeferredStartupScripts = loadDeferred;
+
+            Promise.all(critical).then(function () {
+                k7StartupMark('critical-scripts-loaded');
+                // Prefer AppReady from Blazor; failsafe so home still gets Embla.
+                var done = false;
+                function once() {
+                    if (done) return;
+                    done = true;
+                    loadDeferred();
+                }
+                window.__K7_onAppReadyForScripts = once;
+                setTimeout(once, 4000);
+            });
+        })();
+    </script>
     <script>
         window.blazorCulture = {
             getSaved: () => window.localStorage.getItem('BlazorCulture'),

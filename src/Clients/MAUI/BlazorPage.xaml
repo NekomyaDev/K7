@@ -1,58 +1,27 @@
 ﻿<?xml version="1.0" encoding="utf-8" ?>
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
-             xmlns:local="clr-namespace:K7.Clients.MAUI"
              xmlns:mauiPages="clr-namespace:K7.Clients.MAUI.Pages;assembly=K7.Clients.MAUI"
-             xmlns:toolkit="http://schemas.microsoft.com/dotnet/2022/maui/toolkit"
-             xmlns:skia="clr-namespace:SkiaSharp.Extended.UI.Controls;assembly=SkiaSharp.Extended.UI"
              x:Class="K7.Clients.MAUI.BlazorPage"
              BackgroundColor="#0d0907"
              Padding="0">
 
+    <!-- MediaElement / SKLottieView are created in code when needed. Inflating them here
+         costs multi-second cold start on Android TV (Release). -->
     <Grid x:Name="RootGrid" SafeAreaEdges="None">
-        <!-- Native MediaElement (video): Android ExoPlayer / iOS AVPlayer. SurfaceView on
-             Android avoids TextureView composition freezes. Android text cues
-             sit on RootGrid (ZIndex 3). Windows Direct uses LibVLC; HLS uses Video.js.
-             Overlay (ZIndex 5+) owns chrome. -->
-        <toolkit:MediaElement x:Name="NativePlayer"
-                              Aspect="AspectFit"
-                              IsVisible="False"
-                              ShouldAutoPlay="False"
-                              BackgroundColor="Black"
-                              HorizontalOptions="Fill"
-                              VerticalOptions="Fill"
-                              ShouldShowPlaybackControls="False"
-                              AndroidViewType="SurfaceView"
-                              InputTransparent="True" ZIndex="1"/>
-
-        <!-- Native MediaElement (audio - Android/iOS/MacCatalyst). Windows uses WebView audioplayer.js. -->
-        <toolkit:MediaElement x:Name="NativeAudioPlayer"
-                              IsVisible="False"
-                              ShouldAutoPlay="True"
-                              ShouldShowPlaybackControls="False"
-                              InputTransparent="True"
-                              WidthRequest="0" HeightRequest="0" />
-
-        <!-- Secondary audio element for overlapping crossfade / gapless prebuffer (MacCatalyst) -->
-        <toolkit:MediaElement x:Name="NativeAudioCrossfadePlayer"
-                              IsVisible="False"
-                              ShouldAutoPlay="False"
-                              ShouldShowPlaybackControls="False"
-                              InputTransparent="True"
-                              WidthRequest="0" HeightRequest="0" />
-        
         <!-- Blazor shell: on Android/iOS with native overlay, WebView is hidden during play.
              Windows Video.js + Blazor controls stay in WebView2 for the whole session. -->
         <BlazorWebView x:Name="blazorWebView" HostPage="wwwroot/index.html"
-                   HorizontalOptions="Fill" VerticalOptions="Fill"
-                   BackgroundColor="Transparent" ZIndex="2">
+                   HorizontalOptions="Fill"
+                   VerticalOptions="Fill"
+                   BackgroundColor="Transparent"
+                   ZIndex="2">
             <BlazorWebView.RootComponents>
                 <RootComponent Selector="#app" ComponentType="{x:Type mauiPages:MauiRoutes}" />
             </BlazorWebView.RootComponents>
         </BlazorWebView>
 
-        <!-- Covers WebView until Blazor paints. Static mark matches the Android splash;
-             hidden once Lottie has opaque frames so ImageView cannot cover SKCanvasView. -->
+        <!-- Covers WebView until Blazor paints. Android DecorView Skottie owns branding when shown. -->
         <Grid x:Name="SplashOverlay" ZIndex="3"
               BackgroundColor="#0d0907"
               HorizontalOptions="Fill"
@@ -67,17 +36,6 @@
                    VerticalOptions="Center"
                    InputTransparent="True"
                    ZIndex="0" />
-            <skia:SKLottieView x:Name="SplashAnimation"
-                               Source="splash.json"
-                               RepeatCount="-1"
-                               IsAnimationEnabled="True"
-                               BackgroundColor="Transparent"
-                               WidthRequest="220"
-                               HeightRequest="120"
-                               HorizontalOptions="Center"
-                               VerticalOptions="Center"
-                               ZIndex="1"
-                               AnimationLoaded="OnSplashAnimationLoaded" />
         </Grid>
 
         <!-- Fallback close for native-only paths (Android/iOS); hidden on Windows (Blazor overlay handles close) -->

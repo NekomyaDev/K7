@@ -18,6 +18,16 @@ public static class PreferenceKeys
     public static readonly PreferenceKey<double> PLAYER_CROSSFADE_DURATION = new("PlayerCrossfadeDuration");
     public static readonly PreferenceKey<string> ACCESS_TOKEN = new("AccessToken");
     public static readonly PreferenceKey<string> REFRESH_TOKEN = new("RefreshToken");
+    /// <summary>
+    /// Absolute expiry (round-trip "O" format, UTC) of the stored access token, taken from the
+    /// token response. K7 access tokens are encrypted (JWE), so the client cannot read "exp".
+    /// </summary>
+    public static readonly PreferenceKey<string> ACCESS_TOKEN_EXPIRES_AT = new("AccessTokenExpiresAt");
+    /// <summary>
+    /// JSON snapshot of the signed-in principal's claims (id, name, roles). Restores the
+    /// session without the token endpoint while the stored access token is still valid.
+    /// </summary>
+    public static readonly PreferenceKey<string> SESSION_CLAIMS = new("SessionClaims");
     public static readonly PreferenceKey<string> SERVER_INFO = new("ServerInfo");
     public static readonly PreferenceKey<string> LOCAL_USERS = new("LocalUsers");
     public static readonly PreferenceKey<bool> SINGLE_USER_MODE = new("SingleUserMode");

@@ -738,6 +738,10 @@ public partial class BlazorPage
 
     internal bool TryStopAndroidVideo()
     {
+        // Created on first play: nothing to stop when the page goes away before any video.
+        if (_nativePlayer is null)
+            return false;
+
         try
         {
             SuppressAndroidPlayerViewPlaceholder();
@@ -795,6 +799,9 @@ public partial class BlazorPage
 
     internal void SuppressAndroidPlayerViewPlaceholder()
     {
+        if (_nativePlayer is null)
+            return;
+
         try
         {
             var platformView = NativePlayer.Handler?.PlatformView as Android.Views.View;

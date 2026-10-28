@@ -10,6 +10,7 @@ using K7.Shared.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.JSInterop;
 using System.ComponentModel;
+using SkiaSharp.Extended.UI.Controls;
 #if ANDROID
 using K7.Clients.MAUI.Platforms.Android;
 #endif
@@ -22,6 +23,27 @@ public partial class BlazorPage : ContentPage
     private readonly IAudioPlayerService _audioPlayerService;
     private readonly BackButtonService _backButtonService;
     private readonly IK7ServerService _k7ServerService;
+
+    /// <summary>Video surface. Created in code (not XAML) so Android TV cold start skips Exo/SurfaceView.</summary>
+    private MediaElement? _nativePlayer;
+
+    /// <summary>MacCatalyst audio elements only (see CreatePlatformChrome).</summary>
+#pragma warning disable CS0649 // Assigned only on MacCatalyst TFM
+    private MediaElement? _nativeAudioPlayer;
+    private MediaElement? _nativeAudioCrossfadePlayer;
+#pragma warning restore CS0649
+
+    private SKLottieView? _splashAnimation;
+
+    private MediaElement NativePlayer =>
+        _nativePlayer ?? throw new InvalidOperationException("Native video player is not created yet.");
+
+    private MediaElement NativeAudioPlayer =>
+        _nativeAudioPlayer ?? throw new InvalidOperationException("Native audio player is not created yet.");
+
+    private MediaElement NativeAudioCrossfadePlayer =>
+        _nativeAudioCrossfadePlayer
+        ?? throw new InvalidOperationException("Native audio crossfade player is not created yet.");
 
     private static readonly string DownloadsBasePath = Path.GetFullPath(Path.Combine(FileSystem.AppDataDirectory, "downloads"));
     private static readonly string DownloadsBasePathPrefix = DownloadsBasePath.EndsWith(Path.DirectorySeparatorChar)
@@ -64,6 +86,10 @@ public partial class BlazorPage : ContentPage
     private double? _authRebindResumeOverride;
     private ICustomAuthenticationStateProvider? _authStateProvider;
     private bool _accessTokenChangedSubscribed;
+#if ANDROID
+    private bool _nativeVideoPlayerAttached;
+    private bool _nativeVideoPlayerEventsWired;
+#endif
 
     private static readonly HashSet<string> SensitiveQueryKeys = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -98,15 +124,30 @@ public partial class BlazorPage : ContentPage
         SyncWindowsStreamAuthContext();
 #endif
         blazorWebView.WebResourceRequested += OnWebResourceRequested;
-#if LINUX
-        // GTK4 has no MediaElement / SKLottieView handlers. Video and music play in WebKitGTK
-        // (Video.js / audioplayer.js, same as Windows HLS and Windows audio). Drop the native
-        // elements before the page is attached so no handler is ever requested for them.
-        RootGrid.Children.Remove(NativePlayer);
-        RootGrid.Children.Remove(NativeAudioPlayer);
-        RootGrid.Children.Remove(NativeAudioCrossfadePlayer);
-        SplashOverlay.Children.Remove(SplashAnimation);
-        // Skottie -> Gdk.MemoryTexture replaces SKLottieView (splash.json is a MauiAsset next to the exe).
+        MauiStartupTrace.Mark("CreatePlatformChrome-start");
+        CreatePlatformChrome();
+        MauiStartupTrace.Mark("CreatePlatformChrome-end");
+        InitializeSplashOverlay();
+        InitializePlayer();
+        InitializeAudioPlayer();
+        // Native overlay chrome is deferred to Loaded so cold start is not paying for it
+        // before the first Blazor frame.
+        Loaded += OnBlazorPageLoaded;
+        blazorWebView.BlazorWebViewInitialized += OnBlazorWebViewInitialized;
+        MauiStartupTrace.Mark("BlazorPage-ctor-end");
+    }
+
+    /// <summary>
+    /// Build MediaElement / splash Lottie only where required. Android defers video
+    /// MediaElement until first play (DecorView Skottie already covers splash).
+    /// </summary>
+    private void CreatePlatformChrome()
+    {
+#if ANDROID
+        if (AndroidStartupLottieOverlay.IsShown)
+            SplashLogo.IsVisible = false;
+#elif LINUX
+        // Skottie -> Gdk.MemoryTexture (splash.json MauiAsset next to the exe).
         var linuxSplashLottie = new Platforms.Linux.LinuxLottieView
         {
             Source = Path.Combine(AppContext.BaseDirectory, "splash.json"),
@@ -121,28 +162,107 @@ public partial class BlazorPage : ContentPage
         linuxSplashLottie.FirstFrameRendered += () =>
             Dispatcher.DispatchDelayed(TimeSpan.FromMilliseconds(400), RevealSplashLottie);
         SplashOverlay.Children.Add(linuxSplashLottie);
+#elif WINDOWS
+        // Windows video is LibVLC / Video.js - MediaElement host still exists for chrome layout.
+        EnsureNativeVideoPlayerCreated(attachToTree: true);
+        AttachInPageSplashLottie();
+#elif IOS || MACCATALYST
+        EnsureNativeVideoPlayerCreated(attachToTree: true);
+#if MACCATALYST
+        EnsureNativeAudioPlayersCreated();
 #endif
-#if ANDROID
-        // Audio uses native services on Android - drop unused MediaElements before
-        // handlers/ExoPlayers are created (page not attached to Window yet).
-        RootGrid.Children.Remove(NativeAudioPlayer);
-        RootGrid.Children.Remove(NativeAudioCrossfadePlayer);
+        AttachInPageSplashLottie();
+#endif
+    }
 
-        if (AndroidStartupLottieOverlay.IsShown)
+    private void AttachInPageSplashLottie()
+    {
+        if (_splashAnimation is not null)
+            return;
+
+        _splashAnimation = new SKLottieView
         {
-            // DecorView Skottie owns branding. Skip a second SKLottieView decode / paint.
-            SplashAnimation.IsAnimationEnabled = false;
-            SplashAnimation.Source = null;
-            SplashAnimation.IsVisible = false;
-            SplashLogo.IsVisible = false;
+            Source = new SKFileLottieImageSource { File = "splash.json" },
+            RepeatCount = -1,
+            IsAnimationEnabled = true,
+            BackgroundColor = Colors.Transparent,
+            WidthRequest = 220,
+            HeightRequest = 120,
+            HorizontalOptions = LayoutOptions.Center,
+            VerticalOptions = LayoutOptions.Center,
+            InputTransparent = true,
+            ZIndex = 1
+        };
+        _splashAnimation.AnimationLoaded += OnSplashAnimationLoaded;
+        SplashOverlay.Children.Add(_splashAnimation);
+    }
+
+    private void EnsureNativeVideoPlayerCreated(bool attachToTree)
+    {
+        if (_nativePlayer is not null)
+        {
+            if (attachToTree && !RootGrid.Children.Contains(_nativePlayer))
+                RootGrid.Children.Insert(0, _nativePlayer);
+            return;
         }
+
+        _nativePlayer = new MediaElement
+        {
+            Aspect = Aspect.AspectFit,
+            IsVisible = false,
+            ShouldAutoPlay = false,
+            BackgroundColor = Colors.Black,
+            HorizontalOptions = LayoutOptions.Fill,
+            VerticalOptions = LayoutOptions.Fill,
+            ShouldShowPlaybackControls = false,
+            InputTransparent = true,
+            ZIndex = 1,
+#if ANDROID
+            AndroidViewType = AndroidViewType.SurfaceView,
 #endif
-        InitializeSplashOverlay();
-        InitializePlayer();
-        InitializeAudioPlayer();
-        // Native overlay chrome is deferred to Loaded so cold start is not paying for it
-        // before the first Blazor frame.
-        Loaded += OnBlazorPageLoaded;
+        };
+
+        if (attachToTree)
+            RootGrid.Children.Insert(0, _nativePlayer);
+    }
+
+#if MACCATALYST
+    private void EnsureNativeAudioPlayersCreated()
+    {
+        if (_nativeAudioPlayer is not null)
+            return;
+
+        _nativeAudioPlayer = CreateHiddenAudioMediaElement(shouldAutoPlay: true);
+        _nativeAudioCrossfadePlayer = CreateHiddenAudioMediaElement(shouldAutoPlay: false);
+        RootGrid.Children.Add(_nativeAudioPlayer);
+        RootGrid.Children.Add(_nativeAudioCrossfadePlayer);
+    }
+
+    private static MediaElement CreateHiddenAudioMediaElement(bool shouldAutoPlay) =>
+        new()
+        {
+            IsVisible = false,
+            ShouldAutoPlay = shouldAutoPlay,
+            ShouldShowPlaybackControls = false,
+            InputTransparent = true,
+            WidthRequest = 0,
+            HeightRequest = 0
+        };
+#endif
+
+    private int _startupSplashDismissed;
+
+    private void OnBlazorWebViewInitialized(object? sender, Microsoft.AspNetCore.Components.WebView.BlazorWebViewInitializedEventArgs e)
+    {
+        blazorWebView.BlazorWebViewInitialized -= OnBlazorWebViewInitialized;
+        MauiStartupTrace.Mark("BlazorWebView-initialized");
+#if ANDROID
+        // Throttle Skottie (~10fps) while Blazor boots. The overlay now stays until the page
+        // has painted: index.html K7.dismissPreload -> StartupTraceJsBridge -> DismissWithFade,
+        // with the FirstPaintSignal + 20 s failsafes in InitializeSplashOverlay. Dismissing at
+        // WebView init left ~2 s of dark WebView between the mark and select-profile on TV.
+        AndroidStartupLottieOverlay.PauseTicker();
+#endif
     }
 
     private static string ResolveStartPath()
@@ -163,9 +283,37 @@ public partial class BlazorPage : ContentPage
     private void OnBlazorPageLoaded(object? sender, EventArgs e)
     {
         Loaded -= OnBlazorPageLoaded;
-        InitializeNativeVideoOverlay();
+        MauiStartupTrace.Mark("BlazorPage-Loaded");
         TrySubscribeAccessTokenChanged();
         MauiStartupTrace.Mark("BlazorPage-Loaded-subscribed");
+        // The native video chrome resolves ~15 services and adds a full-size view. It used to
+        // run here, on the main thread, before the WebView had even loaded index.html. Playback
+        // creates it on demand (ShowNativeVideo path); the chrome subscriptions can wait.
+        ScheduleNativeVideoOverlayAfterFirstPaint();
+    }
+
+    private void ScheduleNativeVideoOverlayAfterFirstPaint()
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                await FirstPaintSignal.WaitAsync(cts.Token);
+                await Task.Delay(TimeSpan.FromMilliseconds(1500), cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                // No first paint: build the chrome anyway so remote playback handover works.
+            }
+
+            await MainThread.InvokeOnMainThreadAsync(() =>
+            {
+                MauiStartupTrace.Mark("NativeVideoOverlay-init-start");
+                InitializeNativeVideoOverlay();
+                MauiStartupTrace.Mark("NativeVideoOverlay-init-end");
+            });
+        });
     }
 
     /// <summary>
@@ -216,9 +364,27 @@ public partial class BlazorPage : ContentPage
     {
         var startTime = System.Diagnostics.Stopwatch.GetTimestamp();
 #if ANDROID
-        var decorViewLottie = AndroidStartupLottieOverlay.IsShown;
-#else
-        var decorViewLottie = false;
+        // DecorView path: the JS bridge fades the overlay at K7.dismissPreload. This path is
+        // the fallback (first paint + 400 ms, or 20 s) and the MAUI-side cleanup.
+        if (AndroidStartupLottieOverlay.IsShown)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+                    await FirstPaintSignal.WaitAsync(cts.Token);
+                    await Task.Delay(TimeSpan.FromMilliseconds(400), cts.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    System.Diagnostics.Debug.WriteLine("K7 MAUI - Splash failsafe timeout");
+                }
+
+                await MainThread.InvokeOnMainThreadAsync(DismissStartupSplashUi);
+            });
+            return;
+        }
 #endif
 
         _ = Task.Run(async () =>
@@ -233,25 +399,35 @@ public partial class BlazorPage : ContentPage
                 System.Diagnostics.Debug.WriteLine("K7 MAUI - Splash timeout, hiding anyway");
             }
 
-            // DecorView Lottie already covered branding time. Extra min delay left a
-            // frozen last frame (or loop) after Blazor was ready.
-            if (!decorViewLottie)
-            {
-                var elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(startTime);
-                var remaining = TimeSpan.FromMilliseconds(1500) - elapsed;
-                if (remaining > TimeSpan.Zero)
-                    await Task.Delay(remaining);
-            }
+            var elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(startTime);
+            var remaining = TimeSpan.FromMilliseconds(1500) - elapsed;
+            if (remaining > TimeSpan.Zero)
+                await Task.Delay(remaining);
 
-            MainThread.BeginInvokeOnMainThread(() =>
-            {
-#if ANDROID
-                AndroidStartupLottieOverlay.Dismiss();
-#endif
-                SplashOverlay.IsVisible = false;
-                RootGrid.Children.Remove(SplashOverlay);
-            });
+            await MainThread.InvokeOnMainThreadAsync(DismissStartupSplashUi);
         });
+    }
+
+    /// <summary>
+    /// Idempotent. Removes DecorView / in-page splash so the WebView can paint.
+    /// </summary>
+    private void DismissStartupSplashUi()
+    {
+        if (Interlocked.Exchange(ref _startupSplashDismissed, 1) != 0)
+            return;
+
+#if ANDROID
+        AndroidStartupLottieOverlay.DismissWithFade();
+#endif
+        if (SplashOverlay is not null)
+        {
+            SplashOverlay.IsVisible = false;
+            RootGrid.Children.Remove(SplashOverlay);
+        }
+
+        MauiStartupTrace.Mark("splash-dismiss-ui");
+        TryEvaluateWebViewJs(
+            "try{if(window.__K7_onAppReadyForScripts)window.__K7_onAppReadyForScripts();}catch(e){}");
     }
 
     private void OnSplashAnimationLoaded(object? sender, EventArgs e)
@@ -602,14 +778,12 @@ public partial class BlazorPage : ContentPage
 
     private void InitializePlayer()
     {
-        NativePlayer.Volume = _playerService.Volume;
-        NativePlayer.ShouldMute = _playerService.IsMuted;
-        NativePlayer.MediaOpened += NativePlayer_MediaOpened;
-        NativePlayer.MediaEnded += NativePlayer_MediaEnded;
-        NativePlayer.MediaFailed += NativePlayer_MediaFailed;
-        NativePlayer.PositionChanged += NativePlayer_PositionChanged;
-        NativePlayer.PropertyChanged += NativePlayer_PropertyChanged;
-
+#if ANDROID
+        // MediaElement stays detached until first play (see EnsureNativeVideoPlayerReady).
+#else
+        WireNativeVideoPlayerEvents();
+        InitializePlayerPlatform();
+#endif
         _playerService.SourceChanged += OnSourceChanged;
         _playerService.IsVisibleChanged += OnIsVisibleChanged;
         _playerService.PlayRequested += HandleVideoPlayRequested;
@@ -621,8 +795,40 @@ public partial class BlazorPage : ContentPage
         _playerService.StopRequested += HandleVideoStopRequested;
         _playerService.SeekRequested += HandleVideoSeekRequested;
         _playerService.AspectRatioModeChangeRequested += OnAspectRatioModeChanged;
-        InitializePlayerPlatform();
     }
+
+    private void WireNativeVideoPlayerEvents()
+    {
+#if ANDROID
+        if (_nativeVideoPlayerEventsWired)
+            return;
+        _nativeVideoPlayerEventsWired = true;
+#endif
+        NativePlayer.Volume = _playerService.Volume;
+        NativePlayer.ShouldMute = _playerService.IsMuted;
+        NativePlayer.MediaOpened += NativePlayer_MediaOpened;
+        NativePlayer.MediaEnded += NativePlayer_MediaEnded;
+        NativePlayer.MediaFailed += NativePlayer_MediaFailed;
+        NativePlayer.PositionChanged += NativePlayer_PositionChanged;
+        NativePlayer.PropertyChanged += NativePlayer_PropertyChanged;
+    }
+
+#if ANDROID
+    /// <summary>
+    /// Create and attach video MediaElement / Exo SurfaceView on first play only.
+    /// </summary>
+    private void EnsureNativeVideoPlayerReady()
+    {
+        if (_nativeVideoPlayerAttached)
+            return;
+
+        EnsureNativeVideoPlayerCreated(attachToTree: true);
+        WireNativeVideoPlayerEvents();
+        InitializePlayerPlatform();
+        _nativeVideoPlayerAttached = true;
+        MauiStartupTrace.Mark("native-video-attached");
+    }
+#endif
 
     private Task HandleVideoPlayRequested()
     {
@@ -639,6 +845,7 @@ public partial class BlazorPage : ContentPage
             }
 #endif
 #if ANDROID
+            EnsureNativeVideoPlayerReady();
             if (TrySetAndroidVideoPlayWhenReady(true))
                 return;
 #endif
@@ -672,6 +879,8 @@ public partial class BlazorPage : ContentPage
             }
 #endif
 #if ANDROID
+            if (!_nativeVideoPlayerAttached)
+                return;
             if (TrySetAndroidVideoPlayWhenReady(false))
                 return;
 #endif
@@ -690,6 +899,10 @@ public partial class BlazorPage : ContentPage
             if (IsDesktopWebVideoActive)
                 return;
 #endif
+#if ANDROID
+            if (!_nativeVideoPlayerAttached)
+                return;
+#endif
             NativePlayer.ShouldMute = true;
         });
         return Task.CompletedTask;
@@ -705,6 +918,10 @@ public partial class BlazorPage : ContentPage
             if (IsDesktopWebVideoActive)
                 return;
 #endif
+#if ANDROID
+            if (!_nativeVideoPlayerAttached)
+                return;
+#endif
             NativePlayer.ShouldMute = false;
         });
         return Task.CompletedTask;
@@ -718,6 +935,10 @@ public partial class BlazorPage : ContentPage
             if (TryHandleDesktopVlcVolume(volume))
                 return;
             if (IsDesktopWebVideoActive)
+                return;
+#endif
+#if ANDROID
+            if (!_nativeVideoPlayerAttached)
                 return;
 #endif
             NativePlayer.Volume = volume;
@@ -736,6 +957,8 @@ public partial class BlazorPage : ContentPage
                 return;
 #endif
 #if ANDROID
+            if (!_nativeVideoPlayerAttached)
+                return;
             if (TrySetAndroidVideoSpeed(rate))
                 return;
 #endif
@@ -755,6 +978,8 @@ public partial class BlazorPage : ContentPage
                 return;
 #endif
 #if ANDROID
+            if (!_nativeVideoPlayerAttached)
+                return;
             if (TryStopAndroidVideo())
                 return;
 #endif
@@ -922,6 +1147,9 @@ public partial class BlazorPage : ContentPage
 #endif
 #if !WINDOWS && !LINUX
         // Android ExoPlayer / iOS AVPlayer via MediaElement.
+#if ANDROID
+        EnsureNativeVideoPlayerReady();
+#endif
         // ShowAsync and SourceChanged both marshal to the main thread; if visibility is still
         // pending, force the surface visible before Play.
         if (_playerService.IsVisible && !NativePlayer.IsVisible)
@@ -1174,6 +1402,12 @@ public partial class BlazorPage : ContentPage
                 NativeVideoDebug.Log("KeepScreenOn failed: " + ex.Message);
             }
 #else
+#if ANDROID
+            if (_playerService.IsVisible)
+                EnsureNativeVideoPlayerReady();
+            else if (!_nativeVideoPlayerAttached)
+                return;
+#endif
             NativePlayer.IsVisible = _playerService.IsVisible;
             if (_playerService.IsVisible)
                 ParkNativeVideoSurface(park: false);
@@ -1622,12 +1856,14 @@ public partial class BlazorPage : ContentPage
 #if ANDROID
         TryStopAndroidVideo();
 #endif
-        NativePlayer.Stop();
+        // Players are created lazily (Android video attaches on first play, audio players exist
+        // on Mac Catalyst only): the activity can be destroyed before they were ever created.
+        _nativePlayer?.Stop();
 #if ANDROID
         SuppressAndroidPlayerViewPlaceholder();
 #endif
 #if !WINDOWS
-        NativeAudioPlayer.Stop();
+        _nativeAudioPlayer?.Stop();
 #endif
         DetachEventHandlers();
     }
@@ -2008,11 +2244,14 @@ public partial class BlazorPage : ContentPage
 
         blazorWebView.WebResourceRequested -= OnWebResourceRequested;
 
-        NativePlayer.MediaOpened -= NativePlayer_MediaOpened;
-        NativePlayer.MediaEnded -= NativePlayer_MediaEnded;
-        NativePlayer.MediaFailed -= NativePlayer_MediaFailed;
-        NativePlayer.PositionChanged -= NativePlayer_PositionChanged;
-        NativePlayer.PropertyChanged -= NativePlayer_PropertyChanged;
+        if (_nativePlayer is { } video)
+        {
+            video.MediaOpened -= NativePlayer_MediaOpened;
+            video.MediaEnded -= NativePlayer_MediaEnded;
+            video.MediaFailed -= NativePlayer_MediaFailed;
+            video.PositionChanged -= NativePlayer_PositionChanged;
+            video.PropertyChanged -= NativePlayer_PropertyChanged;
+        }
 
         _playerService.SourceChanged -= OnSourceChanged;
         _playerService.IsVisibleChanged -= OnIsVisibleChanged;

@@ -60,7 +60,7 @@ public partial class Welcome : IDisposable
                 Snackbar.Add(string.Format(S["ErrorWithDetails"], ex.Message), K7Severity.Warning);
         }
 
-        AppReadySignal.Signal();
+        // AppReadySignal: EmptyLayout OnAfterRender after first paint (avoid black WebView).
     }
 
     /// <summary>

@@ -1,4 +1,5 @@
 using System.Net.Http;
+using K7.Clients.Shared.Helpers;
 using K7.Clients.Shared.Interfaces;
 using K7.Clients.Shared.Models;
 using K7.Clients.Shared.Services;
@@ -50,6 +51,11 @@ public partial class SelectProfile
     private int _initialFocusCarouselIndex;
     private bool _profileFocusApplied;
     private bool _selecting;
+    /// <summary>
+    /// False on first paint (shell only). Carousel/avatars mount after AppReady so EmptyLayout
+    /// is not blocked by component JIT on Android TV (~15s).
+    /// </summary>
+    private bool _paintPicker;
 
     private static IReadOnlyDictionary<string, object>? GetInitialFocusAttributes(bool isTarget) =>
         isTarget ? new Dictionary<string, object> { ["data-initial-focus"] = true } : null;
@@ -75,13 +81,16 @@ public partial class SelectProfile
         // so a pinned shared profile is in the first paint.
         ReloadPinnedGroups();
         ComputeInitialFocusTarget();
-        _deviceType = await DeviceService.GetDeviceTypeAsync();
+        // Prefer cache: await GetDeviceTypeAsync is cheap on MAUI but still yields a frame.
+        _deviceType = DeviceService.CachedDeviceType ?? await DeviceService.GetDeviceTypeAsync();
         _isTv = _deviceType == DeviceType.TV;
 
         // Cold start can reach select-profile even when single-user mode is on (e.g. last-active
         // was never written, or session restore ran before SecureStorage was ready). Retry once
         // here - but only when still anonymous so "Switch user" keeps working.
         // PIN-protected profiles require a prior unlock (PIN entered) before auto-auth.
+        // Do not await a long OpenIddict restore here: GetAuthenticationStateAsync returns
+        // current state immediately; restore notifies when finished.
         if (_singleUserMode && _users.Count > 0)
         {
             var authState = await ((AuthenticationStateProvider)AuthService).GetAuthenticationStateAsync();
@@ -90,22 +99,36 @@ public partial class SelectProfile
                 var autoUser = ResolveSoloAutoUser();
                 if (autoUser is not null)
                 {
-                    K7.Clients.Shared.Services.AppReadySignal.Signal();
                     // Dead refresh token: show the picker (reconnect badge), never open the
                     // system browser under a spinner - that left users stuck after snackbar.
                     if (NeedsReconnect(autoUser))
                     {
                         Snackbar.Add(string.Format(L["SessionExpired"], autoUser.UserName), K7Severity.Error);
+                        await SignalAppReadyAfterInitAsync();
                         return;
                     }
 
                     await AuthenticateUserAsync(autoUser, allowInteractiveReconnect: false);
+                    await SignalAppReadyAfterInitAsync();
                     return;
                 }
             }
         }
 
-        K7.Clients.Shared.Services.AppReadySignal.Signal();
+        await SignalAppReadyAfterInitAsync();
+    }
+
+    /// <summary>
+    /// Do not wait for EmptyLayout OnAfterRender (can lag ~10s after init on TV). Splash is
+    /// already dismissed from WebView init. Never await JS here: InvokeAsync before first
+    /// render blocked ~13s on TV (interop waits for a painted circuit).
+    /// </summary>
+    private Task SignalAppReadyAfterInitAsync()
+    {
+        ColdStartTrace.Write("SelectProfile-init-end");
+        AppReadySignal.Signal();
+        // EmptyLayout still calls K7.dismissPreload on first paint.
+        return Task.CompletedTask;
     }
 
     private void ReloadPinnedGroups()
@@ -211,19 +234,25 @@ public partial class SelectProfile
         await SpatialNav.FocusFirstAsync("[data-initial-focus]");
     }
 
-    protected override async Task OnAfterRenderAsync(bool firstRender)
+    protected override Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!_isTv || _loading || _profileFocusApplied)
-            return;
+        if (firstRender && !_paintPicker)
+        {
+            ColdStartTrace.Write("SelectProfile-shell-painted");
+            // Mount rich picker after this frame so EmptyLayout can Signal AppReady first.
+            _paintPicker = true;
+            _ = InvokeAsync(StateHasChanged);
+            return Task.CompletedTask;
+        }
 
-        try
-        {
-            await ApplyInitialTvFocusAsync();
-            _profileFocusApplied = true;
-        }
-        catch (InvalidOperationException)
-        {
-        }
+        // Do not await carousel JS / Embla / spatial nav here. EmptyLayout AppReadySignal
+        // runs after child OnAfterRenderAsync.
+        if (!_paintPicker || !_isTv || _loading || _profileFocusApplied)
+            return Task.CompletedTask;
+
+        _profileFocusApplied = true;
+        ApplyInitialTvFocusAsync().FireAndForget();
+        return Task.CompletedTask;
     }
 
     private void ShowCarousel()
