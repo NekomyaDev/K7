@@ -1,9 +1,17 @@
 using System.Security.Claims;
+using K7.Server.Application.Common.Interfaces;
 using K7.Server.Application.Features.LinkPreview.Queries.GetLinkPreview;
 using K7.Server.Web.Infrastructure;
 using K7.Server.Web.Middleware;
 using K7.Shared.Dtos;
+using MediatR;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Localization;
+using Microsoft.Extensions.Logging.Abstractions;
+using NSubstitute;
+using AppComponent = K7.Server.Web.Components.App;
 
 namespace K7.Server.Web.SmokeTests;
 
@@ -152,5 +160,74 @@ public class LinkPreviewDocumentTests
     public void ServerFeatureFlagsDto_ShouldEnableMediaLinkPreviews_ByDefault()
     {
         new ServerFeatureFlagsDto().MediaLinkPreviewsEnabled.Should().BeTrue();
+    }
+
+    [Test]
+    public async Task InvokeAsync_ShouldForbidCaching_WhenAnonymousHomeGet()
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Method = HttpMethods.Get;
+        context.Request.Path = "/";
+        context.User = new ClaimsPrincipal(new ClaimsIdentity());
+        context.Response.Body = new MemoryStream();
+        var nextCalled = false;
+
+        await CreateMiddleware(_ =>
+        {
+            nextCalled = true;
+            return Task.CompletedTask;
+        }).InvokeAsync(
+            context,
+            Substitute.For<ISender>(),
+            Substitute.For<IServerSettingsService>(),
+            CreateFeatureFlagsCache());
+
+        nextCalled.Should().BeFalse();
+        context.Response.Headers.CacheControl.ToString().Should().Be("no-store");
+        context.Response.Body.Position = 0;
+        var body = await new StreamReader(context.Response.Body).ReadToEndAsync();
+        body.Should().Contain("location.replace('/welcome?returnUrl=");
+    }
+
+    [Test]
+    public async Task InvokeAsync_ShouldCallNext_WhenUserIsAuthenticated()
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Method = HttpMethods.Get;
+        context.Request.Path = "/";
+        context.User = new ClaimsPrincipal(new ClaimsIdentity("cookies"));
+        var nextCalled = false;
+
+        await CreateMiddleware(_ =>
+        {
+            nextCalled = true;
+            return Task.CompletedTask;
+        }).InvokeAsync(
+            context,
+            Substitute.For<ISender>(),
+            Substitute.For<IServerSettingsService>(),
+            CreateFeatureFlagsCache());
+
+        nextCalled.Should().BeTrue();
+        context.Response.Headers.CacheControl.ToString().Should().BeEmpty();
+    }
+
+    private static LinkPreviewDocumentMiddleware CreateMiddleware(RequestDelegate next)
+    {
+        var localizer = Substitute.For<IStringLocalizer<AppComponent>>();
+        localizer["Description"].Returns(new LocalizedString("Description", "Self-hosted media server."));
+
+        return new LinkPreviewDocumentMiddleware(
+            next,
+            new ConfigurationBuilder().Build(),
+            localizer,
+            NullLogger<LinkPreviewDocumentMiddleware>.Instance);
+    }
+
+    private static IMemoryCache CreateFeatureFlagsCache()
+    {
+        var cache = new MemoryCache(new MemoryCacheOptions());
+        cache.Set(ServerFeatureFlagsCache.Key, new ServerFeatureFlagsDto());
+        return cache;
     }
 }

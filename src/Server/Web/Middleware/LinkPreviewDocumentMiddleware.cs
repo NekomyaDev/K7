@@ -14,6 +14,8 @@ public sealed class LinkPreviewDocumentMiddleware(
     IStringLocalizer<AppComponent> localizer,
     ILogger<LinkPreviewDocumentMiddleware> logger)
 {
+    internal const string CacheControl = "no-store";
+
     public async Task InvokeAsync(
         HttpContext context,
         ISender sender,
@@ -54,7 +56,10 @@ public sealed class LinkPreviewDocumentMiddleware(
 
         context.Response.StatusCode = StatusCodes.Status200OK;
         context.Response.ContentType = "text/html; charset=utf-8";
-        context.Response.Headers.CacheControl = "public, max-age=300";
+        // Never cacheable: the same URL serves the app shell once the browser has a session
+        // cookie. A cached copy of this document (browser or reverse proxy) kept redirecting
+        // signed-in phones to /welcome, which sent them back to / in a tight loop.
+        context.Response.Headers.CacheControl = CacheControl;
         await context.Response.WriteAsync(html, context.RequestAborted);
     }
 
