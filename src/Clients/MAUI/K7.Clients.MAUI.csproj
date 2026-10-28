@@ -131,7 +131,41 @@
     <TrimmerSingleWarn>false</TrimmerSingleWarn>
     <NoWarn>$(NoWarn);IL2037</NoWarn>
     <TrimMode>partial</TrimMode>
+    <!--
+      Profiled Mono AOT: the default maui / maui-blazor profiles plus custom.aprof recorded on
+      the TV box (K7 pages, SignalR, auth stack and the generic instantiations created at
+      runtime by System.Text.Json / EF Core, which a static full AOT cannot see). Full AOT of
+      every assembly was measured at 105 MB for no first-paint gain; it stays available for
+      an A/B with -p:AndroidEnableProfiledAot=false. Not NativeAOT / PublishAot (EF Core,
+      OpenIddict and Blazor Hybrid still need the JIT fallback for dynamic code).
+    -->
+    <RunAOTCompilation>true</RunAOTCompilation>
+    <AndroidEnableProfiledAot Condition="'$(AndroidEnableProfiledAot)' == ''">true</AndroidEnableProfiledAot>
   </PropertyGroup>
+
+  <!--
+    Custom AOT profile recorded on a device with Mono.AotProfiler.Android (docs/dev/developing.md,
+    MAUI startup). Picked up automatically when the file exists; only used when
+    AndroidEnableProfiledAot is true, next to the default maui / maui-blazor profiles.
+  -->
+  <ItemGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Release|net10.0-android|AnyCPU' And Exists('$(MSBuildThisFileDirectory)custom.aprof')">
+    <AndroidAotProfile Include="$(MSBuildThisFileDirectory)custom.aprof" />
+  </ItemGroup>
+
+  <!--
+    AOT profile recording build: -p:K7AotProfiling=true (docs/dev/developing.md, MAUI startup).
+    The JIT must stay on so the profiler sees every method, and the Android SDK does not ship
+    libmono-profiler-aot.so itself: it comes from the Mono.AotProfiler.Android package.
+  -->
+  <PropertyGroup Condition="'$(K7AotProfiling)' == 'true' And '$(TargetFramework)' == 'net10.0-android'">
+    <RunAOTCompilation>false</RunAOTCompilation>
+    <AndroidEnableProfiledAot>false</AndroidEnableProfiledAot>
+    <AndroidEnableAotProfiler>true</AndroidEnableAotProfiler>
+    <AndroidEmbedProfilers>aot</AndroidEmbedProfilers>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(K7AotProfiling)' == 'true' And '$(TargetFramework)' == 'net10.0-android'">
+    <PackageReference Include="Mono.AotProfiler.Android" />
+  </ItemGroup>
   
   <ItemGroup>
     <!-- App Icon -->

@@ -29,6 +29,8 @@
     <PackageVersion Include="Microsoft.Extensions.ApiDescription.Server" Version="10.0.14" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.14" />
     <PackageVersion Include="MediatR" Version="12.4.1" />
+    <!-- AOT profile recording only (-p:K7AotProfiling=true on the MAUI project); ships libmono-profiler-aot.so. -->
+    <PackageVersion Include="Mono.AotProfiler.Android" Version="10.0.0-preview1" />
     <PackageVersion Include="Microsoft.AspNetCore.Components.Web" Version="10.0.14" />
     <PackageVersion Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.14" />
     <PackageVersion Include="Microsoft.AspNetCore.Components.WebAssembly.Server" Version="10.0.14" />
