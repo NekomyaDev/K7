@@ -17,6 +17,7 @@ public partial class MiniMusicPlayer : IAsyncDisposable
     [Inject] private IStringLocalizer<SharedResource> S { get; set; } = default!;
     [Inject] private IJSRuntime JS { get; set; } = default!;
     [Inject] private IDeviceService DeviceService { get; set; } = default!;
+    [Inject] private ISpatialNavService SpatialNav { get; set; } = default!;
 
     private ElementReference _progressBarRef;
     private bool _isDragging;
@@ -163,7 +164,7 @@ public partial class MiniMusicPlayer : IAsyncDisposable
         {
             if (_disposed) return;
             _longPressTriggered = true;
-            await InvokeAsync(async () => await StopAndHide());
+            await InvokeAsync(async () => await StopAndHide(restoreFocus: false));
         }, cts.Token, TaskContinuationOptions.OnlyOnRanToCompletion, TaskScheduler.Current);
     }
 
@@ -187,7 +188,10 @@ public partial class MiniMusicPlayer : IAsyncDisposable
         {
             if (_disposed) return;
             _longPressTriggered = true;
-            await InvokeAsync(async () => await StopAndHide());
+            // The key is released on an element that no longer exists: do not leave the
+            // next short press blocked by a stale held-key flag.
+            _keyHeldDown = false;
+            await InvokeAsync(async () => await StopAndHide(restoreFocus: true));
         }, cts.Token, TaskContinuationOptions.OnlyOnRanToCompletion, TaskScheduler.Current);
     }
 
@@ -216,11 +220,17 @@ public partial class MiniMusicPlayer : IAsyncDisposable
     private async Task OnNext() => await Audio.NextAsync();
     private async Task OnPrevious() => await Audio.PreviousAsync();
 
-    private async Task StopAndHide()
+    private async Task StopAndHide(bool restoreFocus)
     {
         Audio.ClearQueue();
         Audio.Stop();
         await Audio.HideAsync();
+
+        // Hiding the player removes the focused button: without a focus target the TV
+        // remote's OK key does nothing until an arrow key lands somewhere. Give focus back
+        // to the page (last focused control, then the page's initial target).
+        if (restoreFocus)
+            await SpatialNav.FocusFirstAsync();
     }
 
     private void ToggleMute()

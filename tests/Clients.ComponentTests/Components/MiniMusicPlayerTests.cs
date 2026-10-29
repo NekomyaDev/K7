@@ -142,6 +142,31 @@ public class MiniMusicPlayerTests
         await ratingService.DidNotReceive().RateMediaAsync(incoming.MediaId, Arg.Any<int>());
     }
 
+    [Test]
+    public async Task RemoteLongPress_ShouldStopThePlayerAndGiveFocusBackToThePage()
+    {
+        var audio = CreateAudioService();
+        audio.IsVisible.Returns(true);
+        StubTracks(audio, CreateTrack());
+        audio.PlaybackState = PlaybackState.Paused;
+        var spatialNav = Substitute.For<ISpatialNavService>();
+
+        using var ctx = CreateContext(audio, spatialNav: spatialNav);
+        var cut = ctx.Render<MiniMusicPlayer>();
+
+        cut.Find(".mini-player-fab-wrap").KeyDown(new KeyboardEventArgs { Key = "Enter" });
+
+        // The long press fires after 600 ms without any render, so WaitForAssertion
+        // (render-driven) would never re-check: poll the substitute instead.
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(3);
+        while (!spatialNav.ReceivedCalls().Any() && DateTime.UtcNow < deadline)
+            await Task.Delay(50);
+
+        audio.Received().ClearQueue();
+        audio.Received().Stop();
+        await spatialNav.Received().FocusFirstAsync();
+    }
+
     private static IAudioPlayerService CreateAudioService()
     {
         var audio = Substitute.For<IAudioPlayerService>();
@@ -169,10 +194,12 @@ public class MiniMusicPlayerTests
         IAudioPlayerService audio,
         bool canRate = false,
         IRatingService? ratingService = null,
-        IConnectivityService? connectivity = null)
+        IConnectivityService? connectivity = null,
+        ISpatialNavService? spatialNav = null)
     {
         var ctx = new BunitContext();
         ctx.Services.AddSingleton(audio);
+        ctx.Services.AddSingleton(spatialNav ?? Substitute.For<ISpatialNavService>());
 
         var deviceService = Substitute.For<IDeviceService>();
         deviceService.GetDeviceTypeAsync().Returns(DeviceType.Desktop);
