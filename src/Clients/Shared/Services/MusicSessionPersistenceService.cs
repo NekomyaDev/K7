@@ -82,6 +82,9 @@ public sealed class MusicSessionPersistenceService : IMusicSessionPersistence, I
     public async Task BindAndRestoreAsync(string identityUserId, CancellationToken cancellationToken = default)
     {
         var version = ++_bindVersion;
+        if (_boundUser is not null && _boundUser != identityUserId)
+            await ResetForUserSwitchAsync();
+
         var profile = _sharedProfiles.ActiveGroupId;
         _scopeKey = profile is Guid profileId
             ? $"{identityUserId}.{profileId:D}"
@@ -114,6 +117,24 @@ public sealed class MusicSessionPersistenceService : IMusicSessionPersistence, I
         _ready = true;
         if (startup.Upload)
             await FlushAsync();
+    }
+
+    /// <summary>
+    /// Another identity signs in on this device: the previous user's queue must neither stay on
+    /// screen nor be saved under the new scope (the non-empty queue used to short-circuit the
+    /// restore, so a user switch kept the other user's session). Its local and server copies
+    /// were already written under the previous scope on each change.
+    /// </summary>
+    private async Task ResetForUserSwitchAsync()
+    {
+        _ready = false;
+        _saveCts?.Cancel();
+        _fingerprint = null;
+        _droppedFinishedQueue = false;
+        _radio.StopRefill();
+        _audio.Stop();
+        _audio.ClearQueue();
+        await _audio.HideAsync();
     }
 
     public void Adopt(MusicSessionSnapshotDto snapshot, bool replace)

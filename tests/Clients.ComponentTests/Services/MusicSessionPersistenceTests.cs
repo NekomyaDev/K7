@@ -259,6 +259,24 @@ public class MusicSessionPersistenceTests
         store.DidNotReceive().Delete(Arg.Any<string>());
     }
 
+    [Test]
+    public async Task BindAndRestore_ShouldDropThePreviousUserQueue_WhenAnotherUserSignsIn()
+    {
+        var audio = CreateAudio();
+        var store = Substitute.For<IMusicSessionStore>();
+        store.Read("user-2.none").Returns(StoredSnapshot("Second"));
+        var sut = CreateSut(audio, store, remember: true, online: false);
+        await sut.BindAndRestoreAsync("user-1");
+        await audio.PlayTracksAsync([Track("First")]);
+
+        await sut.BindAndRestoreAsync("user-2");
+
+        audio.Queue.Should().ContainSingle();
+        audio.CurrentTrack!.Title.Should().Be("Second");
+        audio.IsAwaitingRestoredPlay.Should().BeTrue();
+        store.DidNotReceive().Delete(Arg.Any<string>());
+    }
+
     private static AudioPlayerService CreateAudio()
     {
         var streamUri = Substitute.For<IStreamUriService>();
