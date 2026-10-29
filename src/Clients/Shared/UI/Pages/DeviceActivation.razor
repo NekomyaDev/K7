@@ -8,14 +8,15 @@
 <div class="device-activation">
     @if (_canGoBack)
     {
-        <K7Button Class="device-activation__back focusable"
-                  Variant="text"
-                  Color="secondary"
-                  StartIcon="@Phosphor.ArrowLeft"
-                  OnClick="GoBackToProfiles"
-                  AriaLabel="@L["BackToProfiles"]">
-            @L["BackToProfiles"]
-        </K7Button>
+        @* The wrapper carries the CSS scope: a class passed to a child component's own
+           element is not scoped, so the button used to land in the flex flow next to the
+           card instead of the top-left corner. *@
+        <div class="device-activation__back">
+            <K7IconButton Icon="@Phosphor.ArrowLeft"
+                          Size="lg"
+                          OnClick="GoBackToProfiles"
+                          AriaLabel="@L["BackToProfiles"]" />
+        </div>
     }
 
     <div class="device-activation__card">
