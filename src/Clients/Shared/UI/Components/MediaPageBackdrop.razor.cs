@@ -101,12 +101,14 @@ public partial class MediaPageBackdrop : IAsyncDisposable
             _module ??= await JSRuntime.InvokeAsync<IJSObjectReference>(
                 "import", "./_content/K7.Clients.Shared.UI/js/mediaPageBackdrop.js");
 
-            if (_disposed || _module is null)
+            // Work on a local: DisposeAsync nulls _module while this method awaits, and a null
+            // reference would surface as ArgumentNullException instead of a benign JS failure.
+            if (_disposed || _module is not { } module)
                 return;
 
             if (ScrollFadeEnabled && !_scrollAttached)
             {
-                var attached = await _module.InvokeAsync<bool>("attachScrollFade", ScrollTarget, _rootRef);
+                var attached = await module.InvokeAsync<bool>("attachScrollFade", ScrollTarget, _rootRef);
                 if (_disposed)
                     return;
                 if (attached)
@@ -116,7 +118,7 @@ public partial class MediaPageBackdrop : IAsyncDisposable
             if (!_heroPickAttached)
             {
                 _dotNetRef ??= DotNetObjectReference.Create(this);
-                await _module.InvokeVoidAsync(
+                await module.InvokeVoidAsync(
                     "attachHeroImagePicker",
                     _rootRef,
                     _dotNetRef,
@@ -127,10 +129,12 @@ public partial class MediaPageBackdrop : IAsyncDisposable
             }
 
             await RefreshResolvedUrlsAsync();
-            if (_disposed || _module is null)
+            if (_disposed)
                 return;
 
-            await _module.InvokeVoidAsync("bindDecodedImages", _rootRef);
+            await module.InvokeVoidAsync("bindDecodedImages", _rootRef);
+            if (_disposed)
+                return;
 
             if (_hasPendingFocusedImage)
             {
@@ -146,7 +150,10 @@ public partial class MediaPageBackdrop : IAsyncDisposable
                 && !string.IsNullOrEmpty(softStillUrl)
                 && (!_softStillAttached || _attachedSoftStillImageUrl != softStillUrl))
             {
-                await _module.InvokeAsync<bool>(
+                if (_disposed)
+                    return;
+
+                await module.InvokeAsync<bool>(
                     "attachSoftStillBlur",
                     _rootRef,
                     softStillUrl,
