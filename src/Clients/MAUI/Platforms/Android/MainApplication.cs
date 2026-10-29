@@ -29,9 +29,33 @@ public class MainApplication : MauiApplication
         TaskScheduler.UnobservedTaskException += (sender, args) =>
         {
             System.Diagnostics.Debug.WriteLine($"[K7-CRASH] TaskScheduler.UnobservedTaskException: {args.Exception}");
-            TryReportError(args.Exception, "TaskScheduler.UnobservedTaskException");
+            // Report the faulting exception, not the AggregateException wrapper: the wrapper has
+            // no stack trace, so the server log only showed "message | null | null".
+            var faulting = args.Exception.Flatten().InnerExceptions.FirstOrDefault() ?? (Exception)args.Exception;
+            // Lost connectivity surfaces here as a burst of faulted background tasks (OpenIddict
+            // discovery, token refresh, hub). They retry on their own and are already logged
+            // above; the server error list is for defects.
+            if (!IsTransientNetworkFailure(faulting))
+                TryReportError(faulting, "TaskScheduler.UnobservedTaskException");
             args.SetObserved();
         };
+    }
+
+    private static bool IsTransientNetworkFailure(Exception exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException!)
+        {
+            if (current is HttpRequestException or System.Net.Sockets.SocketException or System.OperationCanceledException)
+                return true;
+
+            // IdentityModel wraps a failed OpenID discovery request (IDX20803) and OpenIddict a
+            // failed HTTP exchange (ProtocolException): both retry on the next call.
+            if (current.Message.StartsWith("IDX20803", StringComparison.Ordinal)
+                || current.GetType().FullName is "OpenIddict.Abstractions.OpenIddictExceptions+ProtocolException")
+                return true;
+        }
+
+        return false;
     }
 
     private static void TryReportError(Exception exception, string context)
