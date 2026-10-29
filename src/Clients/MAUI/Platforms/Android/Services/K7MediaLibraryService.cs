@@ -80,6 +80,7 @@ public class K7MediaLibraryService : MediaLibraryService,
     private bool _radioAwaitingMedia3Playlist;
     private bool _radioAppending;
     private bool _ignorePlayerEnded;
+    private bool _restoredPrepareInProgress;
     private CancellationTokenSource? _radioSyncDebounceCts;
     private CancellationTokenSource? _radioFillCts;
     private static readonly TimeSpan RadioPlaylistSyncDebounce = TimeSpan.FromMilliseconds(400);
@@ -380,6 +381,17 @@ public class K7MediaLibraryService : MediaLibraryService,
 
         try
         {
+            // Restored session prepared paused: the shared PlaybackState setter ignores Paused
+            // while Buffering, so reporting this prepare as Buffering left the mini player on a
+            // spinner instead of the Play button. Stay on Paused until the player is ready.
+            if (_restoredPrepareInProgress)
+            {
+                if (playbackState == 2)
+                    return;
+
+                _restoredPrepareInProgress = false;
+            }
+
             // Player state constants: Idle=1, Buffering=2, Ready=3, Ended=4
             // Single-item Blazor playback has no ExoPlayer playlist, so STATE_ENDED
             // must drive queue advance (same as iOS DidPlayToEndTime -> OnTrackEndedAsync).
@@ -472,6 +484,7 @@ public class K7MediaLibraryService : MediaLibraryService,
     {
         Log.Error(Tag, $"ExoPlayer error: {error?.Message} (code={error?.ErrorCode})");
         _ignorePlayerEnded = false;
+        _restoredPrepareInProgress = false;
         if (_crossfadeInProgress)
             return;
 
@@ -907,6 +920,7 @@ public class K7MediaLibraryService : MediaLibraryService,
         _ignorePlayerEnded = true;
         _player.Stop();
         _player.ClearMediaItems();
+        _restoredPrepareInProgress = false;
         PreparePlayerWithSource(_player, source, startVolume <= 0 ? startVolume : startVolume * _loudnessLinearGain, playWhenReady: true);
         if (startVolume > 0)
             _player.Volume = startVolume * _loudnessLinearGain;
@@ -1509,6 +1523,7 @@ public class K7MediaLibraryService : MediaLibraryService,
                         return;
 
                     RefreshLoudnessGain(applyToPlayer: false);
+                    _restoredPrepareInProgress = true;
                     PreparePlayerWithSource(_player, source, _loudnessLinearGain, playWhenReady: false);
                     _audioPlayerService.CompleteRestoredPrepare();
                     _forwardingPlayer?.NotifyQueueChanged();
